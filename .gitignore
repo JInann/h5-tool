@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 日志
+*.log
+
+# WorkBuddy / Claude 本地配置（含项目记忆，不对外）
+.workbuddy/
+.claude/
+
+# macOS
+.DS_Store
