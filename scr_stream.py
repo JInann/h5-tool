@@ -52,6 +52,11 @@ class Streamer:
         self._stop_ev = threading.Event()
         self._grace_timer = None
         self._server_path = self._resolve_server()
+        # SPS/PPS 参数集缓存：scrcpy raw_stream 只在流开头发一次参数集，
+        # 中途接入的订阅者拿不到就没法 WebCodecs configure。这里解析并缓存，
+        # 新订阅者接入时先注入，保证随时能解码。
+        self._param_sets = {}        # {nal_type: bytes} 含 start code 的完整 NAL
+        self._nal_buf = bytearray()  # Annex-B 解析用的拼接缓冲
 
     def _resolve_server(self):
         if SCRCPY_SERVER_LOCAL.is_file():
@@ -69,11 +74,14 @@ class Streamer:
         cdp.run_adb(f"forward tcp:{PORT} localabstract:{SCID_NAME}")
 
     def _launch(self):
+        # prepend-header-to-sync-frame: 每个关键帧(IDR)前都带上 SPS/PPS，
+        # 中途接入的订阅者最多等一个 GOP 就能拿到参数集并开始解码。
         cmd = (
             f"shell CLASSPATH={DEVICE_SERVER} app_process / "
             f"com.genymobile.scrcpy.Server 4.0 "
             f"tunnel_forward=true audio=false control=false cleanup=false "
-            f"raw_stream=true log_level=warn"
+            f"raw_stream=true log_level=warn "
+            f"video_codec_options=i-frame-interval=1,prepend-header-to-sync-frame=1"
         )
         cdp.run_adb("shell pkill -f com.genymobile.scrcpy.Server")
         time.sleep(0.3)
@@ -99,6 +107,51 @@ class Streamer:
                 time.sleep(0.5)
         raise StreamError(f"连接 scrcpy 视频端口超时：{last_err}")
 
+    def _scan_param_sets(self, chunk):
+        """从 Annex-B 字节流中解析 SPS(7)/PPS(8) 并缓存。
+
+        scrcpy raw_stream 只在流开头发一次参数集，之后只有 P 帧/IDR。
+        中途接入的订阅者拿不到 SPS/PPS 就无法 WebCodecs configure，
+        所以这里把最新一次参数集缓存下来，subscribe 时注入给新订阅者。
+        """
+        self._nal_buf.extend(chunk)
+        buf = self._nal_buf
+        n = len(buf)
+        i = 0
+        while i + 3 < n:
+            # 找 start code（3 或 4 字节）
+            if buf[i] == 0 and buf[i + 1] == 0:
+                if buf[i + 2] == 1:
+                    sc_len = 3
+                elif i + 3 < n and buf[i + 2] == 0 and buf[i + 3] == 1:
+                    sc_len = 4
+                else:
+                    i += 1
+                    continue
+            else:
+                i += 1
+                continue
+            start = i + sc_len
+            # 找下一个 start code
+            j = start
+            while j + 3 < n:
+                if buf[j] == 0 and buf[j + 1] == 0 and (
+                        buf[j + 2] == 1 or
+                        (j + 3 < n and buf[j + 2] == 0 and buf[j + 3] == 1)):
+                    break
+                j += 1
+            if j + 3 >= n:
+                # 不完整的尾部，留到下一轮
+                self._nal_buf = bytearray(buf[i:])
+                return
+            nal = bytes(buf[start:j])
+            if nal:
+                t = nal[0] & 0x1f
+                if t in (7, 8):  # SPS / PPS
+                    self._param_sets[t] = bytes(buf[i:j])
+            i = j
+        self._nal_buf = bytearray()
+
     def _reader_loop(self):
         try:
             while not self._stop_ev.is_set():
@@ -110,6 +163,7 @@ class Streamer:
                     break
                 if not chunk:
                     break
+                self._scan_param_sets(chunk)
                 self._broadcast(chunk)
         finally:
             self._running = False
@@ -164,6 +218,14 @@ class Streamer:
         q = queue.Queue(maxsize=QUEUE_MAX)
         with self._sub_lock:
             self._subs.append(q)
+            # 注入缓存的 SPS/PPS，让中途接入的订阅者也能初始化解码器
+            for t in (7, 8):
+                nal = self._param_sets.get(t)
+                if nal:
+                    try:
+                        q.put_nowait(nal)
+                    except queue.Full:
+                        break
         return q
 
     def unsubscribe(self, q):
@@ -201,6 +263,8 @@ class Streamer:
         with self._sub_lock:
             self._subs.clear()
             self._refcount = 0
+            self._param_sets.clear()
+            self._nal_buf = bytearray()
         with self._life_lock:
             self._proc = None
             self._sock = None

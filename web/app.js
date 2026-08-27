@@ -377,6 +377,11 @@ function createScrcpyPlayer(canvasEl, ctx) {
     } finally {
       stop();
     }
+    // 流意外中断（设备端 server 挂了 / 后端重启），若用户仍处于镜像状态则降级到 PNG
+    if (living && engine === "scrcpy") {
+      $("fpsLabel").textContent = "✗ scrcpy 流中断，已降级到 PNG 镜像";
+      startLegacyEngine();
+    }
   }
   function stop() {
     try { if (reader) reader.cancel(); } catch (e) {}
