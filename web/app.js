@@ -16,6 +16,29 @@ function resolveBackend() {
 }
 let API_BASE = resolveBackend();
 const apiUrl = (path) => API_BASE + path;
+
+// ---------- 设备选择（多设备支持） ----------
+// activeDevice：当前选中设备 serial；null = 默认设备（后端自动选第一台）
+const LS_DEVICE = "h5tool.device";
+let activeDevice = null;
+let webviewOk = true;   // 当前设备 WebView 是否可用（导航/JS 依赖）
+
+function resolveDeviceFromUrl() {
+  const q = new URLSearchParams(location.search).get("device");
+  if (q) {
+    try { localStorage.setItem(LS_DEVICE, q); } catch (e) {}
+    return q;
+  }
+  try { return localStorage.getItem(LS_DEVICE) || null; } catch (e) { return null; }
+}
+
+// 给 path 追加 ?device=（支持已有 query 时用 &）
+function apiUrlDev(path) {
+  if (!activeDevice) return apiUrl(path);
+  const sep = path.includes("?") ? "&" : "?";
+  return apiUrl(path) + `${sep}device=${encodeURIComponent(activeDevice)}`;
+}
+
 // Chrome 142+ PNA/LNA：访问 loopback/local 时必须显式声明 targetAddressSpace，
 // 否则不发 preflight 直接拒绝（公网 origin → 私网 IP）。
 function targetSpaceOf(url) {
@@ -31,7 +54,7 @@ function targetSpaceOf(url) {
 const fetchOpts = (opts, url) => Object.assign({}, opts, { targetAddressSpace: targetSpaceOf(url || API_BASE) });
 
 async function api(path, opts) {
-  const res = await fetch(apiUrl(path), fetchOpts(opts));
+  const res = await fetch(apiUrlDev(path), fetchOpts(opts));
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) {
     const data = await res.json();
@@ -57,16 +80,50 @@ function updateConnUI(connected) {
   }
 }
 
+// 刷新设备按钮组（平铺，点击切换；不触发切换）
+function renderDeviceSelect(devices, current) {
+  const box = $("deviceTabs");
+  if (!devices || !devices.length) {
+    box.innerHTML = '<span class="tab-empty">无设备</span>';
+    return;
+  }
+  // 保留当前选中，否则优先选后端默认设备
+  let keep = current || activeDevice;
+  const valid = devices.some((d) => d.serial === keep);
+  if (!valid) keep = devices[0].serial;
+  box.innerHTML = devices
+    .map((d) => {
+      const model = (d.model || "").replace(/_/g, " ") || "Android";
+      const active = d.serial === keep ? " active" : "";
+      return `<button class="device-tab${active}" data-serial="${d.serial}" title="序列号：${d.serial}">${model}<span class="sub">${d.serial}</span></button>`;
+    })
+    .join("");
+  if (keep !== activeDevice) activeDevice = keep;
+}
+
 async function refreshStatus() {
   try {
-    const s = await (await fetch(apiUrl("/api/status"), fetchOpts())).json();
+    const s = await (await fetch(apiUrlDev("/api/status"), fetchOpts())).json();
     updateConnUI(true);
+    renderDeviceSelect(s.devices, s.device);
     $("dotDevice").className = "dot " + (s.device_connected ? "on" : "off");
     $("deviceLabel").textContent = s.device || "无设备";
     $("dotWebview").className = "dot " + (s.webview ? "on" : "off");
+    webviewOk = !!s.webview;
+    // WebView 不可用时禁用导航/JS，并给提示
+    const wvTitle = s.webview_error ? ("未开 WebView：" + s.webview_error) : "";
+    $("dotWebview").title = wvTitle;
+    const wvHint = $("wvHint");
+    if (wvHint) wvHint.hidden = webviewOk;
+    document.querySelectorAll(".js-eval-btn, .js-send-btn").forEach((b) => {
+      b.disabled = !webviewOk;
+    });
     if (s.screen) {
       screenSize = s.screen;
       $("resLabel").textContent = `${s.screen.width}×${s.screen.height}`;
+    } else {
+      screenSize = null;
+      $("resLabel").textContent = "-";
     }
     if (s.webview === false && s.webview_error) {
       $("dotWebview").title = s.webview_error;
@@ -78,6 +135,26 @@ async function refreshStatus() {
   }
 }
 let screenSize = null;
+
+// 立即把设备按钮高亮切到指定 serial（纯 DOM 操作，不等后端）
+function setActiveTab(serial) {
+  document.querySelectorAll(".device-tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.serial === serial);
+  });
+}
+
+// ---------- 设备切换（点击按钮，即时高亮 + 异步刷新） ----------
+$("deviceTabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".device-tab");
+  if (!btn) return;
+  const serial = btn.dataset.serial;
+  if (serial === activeDevice) return;
+  activeDevice = serial;
+  try { localStorage.setItem(LS_DEVICE, serial || ""); } catch (err) {}
+  setActiveTab(serial);  // 先切高亮，立即反馈
+  stopLive();            // 停掉当前镜像，防止串设备
+  refreshStatus();       // 后台异步刷新状态
+});
 
 // ---------- 后端连接设置（前后端分离） ----------
 $("btnConn").onclick = () => {
@@ -151,7 +228,7 @@ function addRow(value = "") {
   row.className = "url-row";
   row.innerHTML =
     '<input class="url-input" list="urlHistory" placeholder="https://example.com/h5  或 http://{ip}:5173/xx.html" />' +
-    '<button class="btn-send">发送</button>' +
+    '<button class="js-send-btn">发送</button>' +
     '<button class="ghost btn-del" title="删除此行">✕</button>';
   row.querySelector(".url-input").value = value;
   $("urlRows").appendChild(row);
@@ -181,7 +258,7 @@ async function sendUrl(input, btn) {
 $("urlRows").addEventListener("click", (e) => {
   const row = e.target.closest(".url-row");
   if (!row) return;
-  if (e.target.classList.contains("btn-send")) {
+  if (e.target.classList.contains("js-send-btn")) {
     sendUrl(row.querySelector(".url-input"), e.target);
   } else if (e.target.classList.contains("btn-del")) {
     row.remove();
@@ -193,7 +270,7 @@ $("urlRows").addEventListener("input", (e) => {
 });
 $("urlRows").addEventListener("keydown", (e) => {
   if (e.target.classList.contains("url-input") && e.key === "Enter") {
-    sendUrl(e.target, e.target.closest(".url-row").querySelector(".btn-send"));
+    sendUrl(e.target, e.target.closest(".url-row").querySelector(".js-send-btn"));
   }
 });
 $("btnAddRow").onclick = () => { addRow(""); saveRows(); };
@@ -264,7 +341,7 @@ $("portCustom").addEventListener("keydown", (e) => { if (e.key === "Enter") $("b
 
 // ---------- 3. 实时镜像 + 截图/复制/下载 + 点击 ----------
 async function grabScreenshot() {
-  const res = await fetch(apiUrl("/api/screenshot?t=" + Date.now()), fetchOpts());
+  const res = await fetch(apiUrlDev("/api/screenshot?t=" + Date.now()), fetchOpts());
   if (!res.ok) throw new Error("截图失败 HTTP " + res.status);
   return await res.blob();
 }
@@ -442,7 +519,7 @@ function createScrcpyPlayer(canvasEl, ctx) {
     if (pos > 0) buf = buf.slice(pos);
   }
   async function start() {
-    const res = await fetch(apiUrl("/api/stream"), fetchOpts());
+    const res = await fetch(apiUrlDev("/api/stream"), fetchOpts());
     if (!res.ok || !res.body) throw new Error("视频流不可用（scrcpy 未启动？）");
     reader = res.body.getReader();
     try {
@@ -600,6 +677,8 @@ document.querySelectorAll(".card-title").forEach((title) => {
 });
 
 // ---------- 初始化 ----------
+// 设备选择：URL ?device= 优先，其次 localStorage（多 tab 各选各的）
+activeDevice = resolveDeviceFromUrl();
 $("btnRefresh").onclick = refreshStatus;
 refreshStatus();
 setInterval(() => { if (!living) refreshStatus(); }, 8000);

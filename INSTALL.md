@@ -17,9 +17,8 @@
 | 端口 | 用途 |
 |------|------|
 | **12787** | 本服务 HTTP 控制台（`http://127.0.0.1:12787/`） |
-| **9222**  | 手机 WebView 的 CDP 调试端口（`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`） |
-| **27183** | scrcpy 视频流（设备端 H.264 → 浏览器 WebCodecs） |
-| **9333**  | （可选）本机 Chrome 调试端口（Chrome Debug.app 启动） |
+| **9222**  | 手机 WebView 的 CDP 调试端口（`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`，多设备按槽位偏移） |
+| **27183** | scrcpy 视频流（设备端 H.264 → 浏览器 WebCodecs，多设备按槽位偏移） |
 
 ### 核心文件
 
@@ -183,7 +182,6 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 | 控制台报 `WebSocket connection to 'ws://127.0.0.1:9222/...' failed`（无 CSP 字样） | **直连 9222 被 Origin 校验拒绝**（Chrome 111+，手机 WebView 也校验）：浏览器 iframe 带 Origin 会被 403 | 必须走 `/cdp-ws/<targetId>` 本地代理（代理用无 Origin 连接转发到 9222）；确认代理地址正确 |
 | 报 `Executing inline script violates CSP 'script-src ...'`（prepare.js） | 浏览器扩展/脚本管理器注入的脚本被 devtools 页面 CSP 拦 | **无害**，devtools 自身不需要 inline script；忽略即可 |
 | DevTools 面板显示但连不上目标 | target id 过期（页面导航/WebView 重建） | 回 `devtools.html` 列表重新点「内嵌打开」 |
-| 本机 Chrome（9333）不在目标列表 | 9333 调试端口没开 | 用 Chrome Debug.app 启动（带 `--remote-debugging-port=9333 --user-data-dir`）；确认带 `--remote-allow-origins` |
 
 ### devtools 产物重建（可选，仅升级面板时需要）
 

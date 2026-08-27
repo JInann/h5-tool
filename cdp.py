@@ -10,6 +10,7 @@
 """
 
 import base64
+import hashlib
 import json
 import os
 import socket
@@ -19,26 +20,116 @@ import time
 import urllib.request
 
 CDP_PORT = 9222
+CDP_SLOTS = 64           # 多设备时 CDP 端口槽位数量（9222 ~ 9222+63）
+DEVICE_SLOT_SEED = "h5tool-device-slot"
 
 
 def _run(cmd, timeout=10):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
 
 
-def run_adb(cmd, timeout=10):
+def run_adb(cmd, timeout=10, serial=None):
+    """执行 adb 命令。serial 非空时指定设备（adb -s <serial>），否则走默认设备。"""
+    if serial:
+        return _run(f"adb -s {serial} {cmd}", timeout=timeout)
     return _run(f"adb {cmd}", timeout=timeout)
 
 
-def find_webview(timeout=5):
-    """从 /proc/net/unix 中找到当前 WebView 的 devtools socket PID。"""
+def device_slot(serial, used_slots=()):
+    """按 serial 计算稳定端口槽位（0 ~ CDP_SLOTS-1）。
+
+    用 hash 固定序列，避免 adb devices 顺序抖动导致端口漂移；
+    used_slots 里已有槽位（其它在线设备占用的）会被线性探测跳过，保证无冲突。
+    """
+    digest = hashlib.md5((DEVICE_SLOT_SEED + serial).encode()).hexdigest()
+    slot = int(digest[:4], 16) % CDP_SLOTS
+    used = set(used_slots or ())
+    while slot in used:
+        slot = (slot + 1) % CDP_SLOTS
+    return slot
+
+
+def cdp_port_for(serial, used_slots=()):
+    """该设备对应的 CDP 转发端口（9222 + 槽位）。"""
+    return CDP_PORT + device_slot(serial, used_slots=used_slots)
+
+
+def resolve_port(serial, base, serials):
+    """给 serial 分配一个端口（base + 槽位），避开其它在线设备已占用的槽位。
+
+    serials: 当前所有在线设备的 serial 列表（含自己）。
+    返回端口号。冲突时线性探测顺延，保证同机多设备端口不重叠。
+    """
+    others = [s for s in serials if s != serial]
+    used = {device_slot(s) for s in others}
+    return base + device_slot(serial, used_slots=used)
+
+
+def list_devices():
+    """解析 `adb devices -l`，返回 [{serial, model, product, state}]（按连接顺序）。"""
+    r = run_adb("devices -l")
+    out = []
+    for line in r.stdout.splitlines()[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        serial, state = parts[0], parts[1]
+        info = {"serial": serial, "state": state, "model": None, "product": None}
+        for kv in parts[2:]:
+            if ":" in kv:
+                k, v = kv.split(":", 1)
+                if k in ("model", "product"):
+                    info[k] = v
+        out.append(info)
+    return out
+
+
+def default_serial():
+    """返回默认设备 serial（adb devices 第一个处于 device 状态的），没有则 None。"""
+    for d in list_devices():
+        if d["state"] == "device":
+            return d["serial"]
+    return None
+
+
+# WebView socket 名缓存：WiFi adb 下 cat /proc/net/unix 走网络很慢（2s+），
+# 而 socket 名在 WebView 存活期间基本不变，缓存可让 status 轮询秒回。
+# 仅在找到时缓存；找不到不缓存，避免误判。
+_sock_cache = {}          # serial -> (sock_name, ts)
+_SOCK_TTL = 8.0
+
+
+def find_webview(serial, timeout=5):
+    """从指定设备的 /proc/net/unix 中找到当前 WebView 的 devtools socket 名。
+
+    兼容两种命名（部分厂商浏览器会加前缀）：
+      - @webview_devtools_remote_<pid>         标准 WebView
+      - @browser_webview_devtools_remote_<pid> 小米浏览器等
+    返回去掉 @ 的完整 socket 名（如 webview_devtools_remote_17241），
+    供 adb forward localabstract 使用；找不到返回 None。
+    """
+    now = time.time()
+    hit = _sock_cache.get(serial)
+    if hit and now - hit[1] < _SOCK_TTL:
+        return hit[0]
     for _ in range(timeout):
-        r = run_adb("shell cat /proc/net/unix", timeout=5)
+        try:
+            r = run_adb("shell cat /proc/net/unix", timeout=5, serial=serial)
+        except Exception:
+            # 设备/ADB 临时不可用（如超时），继续轮询
+            time.sleep(0.5)
+            continue
         for line in r.stdout.split("\n"):
-            if "@webview_devtools_remote_" in line:
-                pid = line.strip().split("_")[-1]
-                if pid.isdigit():
-                    return pid
-        time.sleep(1)
+            if "webview_devtools_remote_" in line and "@" in line:
+                name = line.split("@", 1)[-1].strip()
+                # 形如 webview_devtools_remote_17241 或 browser_webview_devtools_remote_15802
+                if name.split("_")[-1].isdigit():
+                    _sock_cache[serial] = (name, now)
+                    return name
+        time.sleep(0.5)
     return None
 
 
@@ -167,28 +258,37 @@ class WebSocketClient:
 
 
 class CDPSession:
-    """管理 ADB 转发 + WebSocket，提供 navigate / evaluate。"""
+    """按设备管理 ADB 转发 + WebSocket，提供 navigate / evaluate。
+
+    多设备支持：setup(serial) 为每台设备建立独立端口转发（9222+槽位），
+    会话状态按 serial 缓存。
+    """
 
     def __init__(self):
-        self.ws_url = None
-        self.current_url = None
+        self._sessions = {}   # serial -> {"ws_url":..., "current_url":...}
 
-    def setup(self):
-        """建立到当前 WebView 的 CDP 连接信息（幂等，可重复调用刷新）。"""
-        r = run_adb("devices")
-        devices = [l for l in r.stdout.strip().split("\n")[1:] if l.strip() and "device" in l]
-        if not devices:
+    def setup(self, serial=None):
+        """建立指定设备（默认第一台）到其 WebView 的 CDP 连接信息（幂等，可重复调用刷新）。
+
+        返回 (serial, ws_url)。若传入的 serial 未连接，自动回退到默认设备。
+        """
+        if serial is None:
+            serial = default_serial()
+        if serial is None:
             raise CDPError("未检测到已连接的设备（adb devices 为空）")
 
-        pid = find_webview(timeout=5)
-        if not pid:
+        sock_name = find_webview(serial, timeout=5)
+        if not sock_name:
             raise CDPError("未找到 WebView（请确保 App 已打开 H5 页面并开启了 WebView 调试）")
 
-        run_adb(f"forward tcp:{CDP_PORT} localabstract:webview_devtools_remote_{pid}")
+        serials = [d["serial"] for d in list_devices()]
+        port = resolve_port(serial, CDP_PORT, serials)
+        run_adb(f"forward tcp:{port} localabstract:{sock_name}",
+                serial=serial)
         time.sleep(0.3)
 
         try:
-            pages = _http_get_json(f"http://127.0.0.1:{CDP_PORT}/json")
+            pages = _http_get_json(f"http://127.0.0.1:{port}/json")
         except Exception as e:
             raise CDPError(f"读取 CDP 页面列表失败：{e}")
         if not pages:
@@ -197,16 +297,32 @@ class CDPSession:
         # 优先选择类型为 page 的目标
         page_targets = [p for p in pages if p.get("type") == "page"] or pages
         target = page_targets[0]
-        self.ws_url = target.get("webSocketDebuggerUrl")
-        self.current_url = target.get("url", "")
-        if not self.ws_url:
+        ws_url = target.get("webSocketDebuggerUrl")
+        if not ws_url:
             raise CDPError("目标页面没有 webSocketDebuggerUrl")
-        return self.ws_url
+        self._sessions[serial] = {
+            "ws_url": ws_url,
+            "current_url": target.get("url", ""),
+        }
+        return serial, ws_url
 
-    def _command(self, method, params=None):
-        if not self.ws_url:
-            self.setup()
-        ws = WebSocketClient(self.ws_url)
+    def _session(self, serial):
+        """取已建立的会话；未建立则先 setup。serial 为空用默认设备。"""
+        if serial is None:
+            serial = default_serial()
+        if serial is None:
+            raise CDPError("未检测到已连接的设备（adb devices 为空）")
+        if serial not in self._sessions:
+            self.setup(serial)
+        return serial, self._sessions[serial]
+
+    def current_url(self, serial=None):
+        _, sess = self._session(serial)
+        return sess["current_url"]
+
+    def _command(self, method, params=None, serial=None):
+        serial, sess = self._session(serial)
+        ws = WebSocketClient(sess["ws_url"])
         ws.connect()
         try:
             ws.send_text(json.dumps({"id": 1, "method": method, "params": params or {}}))
@@ -221,22 +337,22 @@ class CDPSession:
         finally:
             ws.close()
 
-    def command(self, method, params=None):
+    def command(self, method, params=None, serial=None):
         """执行命令，连接失效时自动重建一次。"""
         try:
-            return self._command(method, params)
+            return self._command(method, params, serial=serial)
         except (OSError, CDPError):
             # WebView 可能已重建（PID 变化），刷新后重试一次
-            self.setup()
-            return self._command(method, params)
+            self.setup(serial=serial)
+            return self._command(method, params, serial=serial)
 
-    def navigate(self, url):
-        return self.command("Page.navigate", {"url": url})
+    def navigate(self, url, serial=None):
+        return self.command("Page.navigate", {"url": url}, serial=serial)
 
-    def evaluate(self, expression):
+    def evaluate(self, expression, serial=None):
         return self.command("Runtime.evaluate", {
             "expression": expression,
             "returnByValue": True,
             "awaitPromise": True,
             "allowUnsafeEvalBlocklistBypass": True,
-        })
+        }, serial=serial)

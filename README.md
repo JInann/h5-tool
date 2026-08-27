@@ -87,7 +87,7 @@ run.bat               # Windows cmd / PowerShell
                                    │          └─ Runtime.evaluate  (执行 JS)
                                    ├─ WebView 调试（devtools-frontend 复用）
                                    │     ├─ /devtools/ 静态托管（devtools-local/front_end）
-                                   │     ├─ /api/webview-targets 目标列表（9222 手机 / 9333 本机 Chrome）
+                                   │     ├─ /api/webview-targets 目标列表（指定设备 WebView）
                                    │     └─ /cdp-ws/<targetId> WebSocket 代理
                                    │          └─ 绕过 WebView CDP 的 Origin 校验 → 9222
                                    └─ 视频流：scrcpy-server (设备端 MediaCodec 硬件 H.264)
@@ -127,27 +127,38 @@ mkdir -p dist && cp web/index.html web/app.js web/devtools.html web/config.js di
 
 ## HTTP 接口
 
+> **多设备支持（v2）**：所有接口都支持 `device` 参数（GET 用 `?device=SERIAL`，
+> POST 用 body 里的 `device` 字段），不传则默认操作 `adb devices` 第一台设备。
+> 设备列表见 `GET /api/devices`。端口按设备序列号哈希分配固定槽位：
+> CDP `9222+槽位`、scrcpy `27183+槽位`，多台设备互不冲突、互不干扰。
+>
+> **WebView socket 命名兼容**：标准 WebView 是 `@webview_devtools_remote_<pid>`，
+> 但小米浏览器等会带前缀（`@browser_webview_devtools_remote_<pid>`），
+> 已兼容两种命名，`adb forward localabstract` 使用完整 socket 名。
+
 | 方法 | 路径              | 说明                                  |
 |------|-------------------|---------------------------------------|
-| GET  | `/api/status`     | 设备 / WebView / 分辨率 / scrcpy 状态 |
+| GET  | `/api/devices`    | 设备列表（serial/model/product）+ 默认设备 |
+| GET  | `/api/status`     | 指定设备状态（WebView / 分辨率 / scrcpy） |
 | GET  | `/api/screenshot` | 返回 PNG（静态截图 / 降级镜像用）      |
-| GET  | `/api/stream`     | chunked H.264 裸流，供 WebCodecs 解码  |
-| GET  | `/api/webview-targets` | 可调试目标列表（手机 WebView 9222 + 本机 Chrome 9333） |
-| GET  | `/cdp-ws/<targetId>` | WebSocket 代理：转发到 WebView CDP（绕过 Origin 校验） |
+| GET  | `/api/stream`     | chunked H.264 裸流，供 WebCodecs 解码（按设备懒启动） |
+| GET  | `/api/webview-targets` | 可调试目标列表（指定设备 WebView） |
+| GET  | `/cdp-ws/<targetId>` | WebSocket 代理：转发到指定设备 WebView CDP（绕过 Origin 校验） |
 | GET  | `/devtools/*`     | devtools-frontend 静态资源（DevTools 面板） |
-| POST | `/api/navigate`   | `{url}` 导航当前 WebView              |
-| POST | `/api/eval`       | `{expression}` 执行 JS，返回 `{value,type}` |
-| POST | `/api/tap`        | `{x,y}` 设备坐标点击                  |
-| POST | `/api/swipe`      | `{x1,y1,x2,y2,dur}` 滑动             |
-| POST | `/api/key`        | `{code}` 按键（back=4, home=3）      |
-| POST | `/api/text`       | `{text}` 输入文本                    |
+| POST | `/api/navigate`   | `{url, device?}` 导航当前 WebView      |
+| POST | `/api/eval`       | `{expression, device?}` 执行 JS，返回 `{value,type}` |
+| POST | `/api/tap`        | `{x,y, device?}` 设备坐标点击          |
+| POST | `/api/swipe`      | `{x1,y1,x2,y2,dur, device?}` 滑动     |
+| POST | `/api/key`        | `{code, device?}` 按键（back=4, home=3） |
+| POST | `/api/text`       | `{text, device?}` 输入文本             |
 | POST | `/api/restart`    | 重启本服务（launchctl kickstart，代码改动后生效） |
 
 ## WebView 调试（复用 Chrome DevTools）
 
-控制台右上角「🛠 调试」进入 `web/devtools.html`，列出手机 WebView（9222）与本机 Chrome
-（9333）的调试目标，点击「内嵌打开」在右侧 iframe 使用完整 DevTools（Console / Sources 断点 /
-Network / Storage / Elements），或「新窗口」独立打开。
+控制台右上角「🛠 调试」进入 `web/devtools.html`，顶部可选择设备，列出该设备 WebView
+的调试目标，点击「内嵌打开」在右侧 iframe 使用完整 DevTools
+（Console / Sources 断点 / Network / Storage / Elements），或「新窗口」独立打开。
+多台设备时多个浏览器标签各选一台即可并行调试。
 
 工作原理：devtools-frontend（Chromium 开源前端）是纯 Web 应用，给它一个 CDP WebSocket 地址
 （`inspector.html?ws=...`）即可工作。因为 Android WebView（Chrome 111+ 内核）的 CDP server
@@ -191,8 +202,7 @@ export DEVTOOLS_DIR=http://服务器IP:端口/devtools
 已知限制：
 
 - **仅 Android**：devtools-frontend 只认 CDP，iOS WKWebView 不适用（iOS 可用 vConsole/eruda 注入方案）。
-- 手机 WebView 需开启 `setWebContentsDebuggingEnabled(true)`；本机 Chrome 需用 Chrome Debug.app
-  （9333）启动且带 `--remote-allow-origins` 才会出现在目标列表。
+- 手机 WebView 需开启 `setWebContentsDebuggingEnabled(true)` 才会出现在目标列表。
 - 页面导航 / WebView 重建后 target id 会变，重新在列表里点目标即可。
 
 ## 后台常驻 / 开机自启（macOS launchd）

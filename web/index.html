@@ -25,6 +25,18 @@
   .status { display: flex; gap: 14px; margin-left: auto; font-size: 12px; color: var(--muted); align-items: center; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; background: var(--muted); }
   .dot.on { background: var(--ok); } .dot.off { background: var(--err); }
+  /* 设备切换按钮组（平铺，点击切换） */
+  .device-tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; max-width: 420px; }
+  .device-tab {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 4px 12px; font: inherit; font-size: 12.5px;
+    cursor: pointer; white-space: nowrap; transition: all .15s;
+  }
+  .device-tab:hover { border-color: var(--accent); color: var(--accent); }
+  .device-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .device-tab .sub { opacity: .72; font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .device-tab.active .sub { opacity: .85; }
+  .tab-empty { color: var(--muted); font-size: 12px; }
   .layout {
     flex: 1; min-height: 0;
     display: grid; grid-template-columns: 620px 1fr; gap: 16px; padding: 16px;
@@ -87,6 +99,7 @@
   }
   .msg { font-size: 12px; margin-top: 8px; min-height: 16px; }
   .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  .wv-hint { color: var(--warn); }
   /* 屏幕镜像 */
   #screenWrap { display: flex; flex-direction: column; align-items: center; }
   #screenFrame {
@@ -143,6 +156,7 @@
 <header>
   <h1>📱 H5 小工具控制台</h1>
   <div class="status">
+    <div class="device-tabs" id="deviceTabs" title="点击切换要操作的设备"><span class="tab-empty">检测中…</span></div>
     <span><span class="dot" id="dotDevice"></span><span id="deviceLabel">检测中…</span></span>
     <span><span class="dot" id="dotWebview"></span>WebView</span>
     <a href="/devtools.html" style="color:var(--accent);text-decoration:none;font-size:13px;white-space:nowrap;">🛠 调试</a>
@@ -166,7 +180,7 @@
       <div class="card-body">
         <div id="urlRows"></div>
         <button class="ghost" id="btnAddRow" style="width:100%;">＋ 新增一行</button>
-        <div class="hint">每行可独立发送（回车也行）；输入内容与发送过的历史会自动保存，下次打开仍在。<br>链接里写 <code>{ip}</code> 会自动替换为本机实际 IP，例如 <code>http://{ip}:5173/GuardTeam.html</code>。</div>
+        <div class="hint">每行可独立发送（回车也行）；输入内容与发送过的历史会自动保存，下次打开仍在。<br>链接里写 <code>{ip}</code> 会自动替换为本机实际 IP，例如 <code>http://{ip}:5173/GuardTeam.html</code>。<br><span id="wvHint" class="wv-hint" hidden>⚠ 当前设备未开 WebView（无 H5 页面），导航/JS 不可用，截图/点击/镜像不受影响。</span></div>
         <div class="msg" id="navMsg"></div>
         <datalist id="urlHistory"></datalist>
       </div>
@@ -177,7 +191,7 @@
       <div class="card-body">
         <textarea id="jsInput" placeholder="例如：&#10;document.title&#10;location.href&#10;JSON.stringify(window.__INITIAL_STATE__)"></textarea>
         <div class="row" style="margin-top:8px;">
-          <button id="btnEval">执行</button>
+          <button id="btnEval" class="js-eval-btn">执行</button>
           <button class="ghost" id="btnEvalClear">清空结果</button>
         </div>
         <pre class="out" id="jsOut" style="display:none;"></pre>

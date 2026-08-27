@@ -26,7 +26,7 @@ HERE = Path(__file__).parent
 SCRCPY_SERVER_LOCAL = HERE / "scrcpy-server"
 SCRCPY_SERVER_FALLBACK = Path("/opt/homebrew/Cellar/scrcpy/4.0/share/scrcpy/scrcpy-server")
 DEVICE_SERVER = "/data/local/tmp/scrcpy-server.jar"
-PORT = 27183
+PORT_BASE = 27183
 SCID_NAME = "scrcpy"          # localabstract 名（未指定 scid 时默认）
 LAUNCH_TIMEOUT = 8.0
 QUEUE_MAX = 30                # 每个订阅者缓冲帧数，超出丢弃最旧帧
@@ -39,7 +39,11 @@ class StreamError(Exception):
 
 
 class Streamer:
-    def __init__(self):
+    def __init__(self, serial):
+        # 每台设备一个实例：scrcpy 端口 = 27183 + 设备槽位，互不冲突
+        self.serial = serial
+        serials = [d["serial"] for d in cdp.list_devices()]
+        self.port = cdp.resolve_port(serial, PORT_BASE, serials)
         self._life_lock = threading.Lock()   # 控制 start/stop/running
         self._sub_lock = threading.Lock()    # 控制订阅者列表/引用计数
         self._proc = None
@@ -67,11 +71,11 @@ class Streamer:
 
     # ---------------- 生命周期 ----------------
     def _push_server(self):
-        cdp.run_adb(f"push {self._server_path} {DEVICE_SERVER}", timeout=30)
+        cdp.run_adb(f"push {self._server_path} {DEVICE_SERVER}", timeout=30, serial=self.serial)
 
     def _adb_forward(self):
-        cdp.run_adb(f"forward --remove tcp:{PORT}")
-        cdp.run_adb(f"forward tcp:{PORT} localabstract:{SCID_NAME}")
+        cdp.run_adb(f"forward --remove tcp:{self.port}", serial=self.serial)
+        cdp.run_adb(f"forward tcp:{self.port} localabstract:{SCID_NAME}", serial=self.serial)
 
     def _launch(self):
         # prepend-header-to-sync-frame: 每个关键帧(IDR)前都带上 SPS/PPS，
@@ -83,10 +87,11 @@ class Streamer:
             f"raw_stream=true log_level=warn "
             f"video_codec_options=i-frame-interval=1,prepend-header-to-sync-frame=1"
         )
-        cdp.run_adb("shell pkill -f com.genymobile.scrcpy.Server")
+        # 只杀本设备上的 scrcpy server，避免误杀其它设备的流
+        cdp.run_adb("shell pkill -f com.genymobile.scrcpy.Server", serial=self.serial)
         time.sleep(0.3)
         self._proc = subprocess.Popen(
-            f"adb {cmd}", shell=True,
+            f"adb -s {self.serial} {cmd}", shell=True,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
@@ -99,7 +104,7 @@ class Streamer:
         last_err = None
         while time.time() < deadline:
             try:
-                self._sock = socket.create_connection(("127.0.0.1", PORT), timeout=2)
+                self._sock = socket.create_connection(("127.0.0.1", self.port), timeout=2)
                 self._sock.settimeout(1.0)
                 return
             except OSError as e:
@@ -258,8 +263,8 @@ class Streamer:
                     self._proc.kill()
         except Exception:
             pass
-        cdp.run_adb("shell pkill -f com.genymobile.scrcpy.Server")
-        cdp.run_adb(f"forward --remove tcp:{PORT}")
+        cdp.run_adb("shell pkill -f com.genymobile.scrcpy.Server", serial=self.serial)
+        cdp.run_adb(f"forward --remove tcp:{self.port}", serial=self.serial)
         with self._sub_lock:
             self._subs.clear()
             self._refcount = 0
@@ -275,5 +280,25 @@ class Streamer:
             return self._running
 
 
-# 模块级单例，供 server.py 直接引用
-streamer = Streamer()
+# 模块级：按设备序列号缓存 streamer 实例（懒加载，只有被订阅才起流）
+_streamers = {}
+_streamers_lock = threading.Lock()
+
+
+def get_streamer(serial):
+    """获取指定设备的 Streamer 实例（不存在则创建，不启动）。"""
+    with _streamers_lock:
+        if serial not in _streamers:
+            _streamers[serial] = Streamer(serial)
+        return _streamers[serial]
+
+
+def stop_all():
+    """停止所有设备的流（进程退出时清理）。"""
+    with _streamers_lock:
+        items = list(_streamers.values())
+    for s in items:
+        try:
+            s.stop()
+        except Exception:
+            pass

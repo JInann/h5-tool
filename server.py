@@ -31,11 +31,12 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cdp import CDPError, CDPSession, _http_get_json, run_adb, CDP_PORT, WebSocketClient
-from scr_stream import StreamError, streamer
+from cdp import (CDPError, CDPSession, _http_get_json, run_adb, WebSocketClient,
+                 resolve_port, default_serial, list_devices, CDP_PORT)
+from scr_stream import StreamError, get_streamer, stop_all
 
-# 进程退出时清理设备端 scrcpy server 与转发
-atexit.register(lambda: streamer.stop())
+# 进程退出时清理所有设备的设备端 scrcpy server 与转发
+atexit.register(stop_all)
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -95,10 +96,10 @@ def restart_service():
         sys.stderr.write(f"[h5-tool] 重启失败：{e}\n")
 
 
-def adb_screencap_png(timeout=15):
+def adb_screencap_png(serial, timeout=15):
     """用 exec-out 直接把 PNG 从 stdout 拉回，避免落盘与 CRLF 转换。"""
     r = subprocess.run(
-        "adb exec-out screencap -p",
+        f"adb -s {serial} exec-out screencap -p",
         shell=True, capture_output=True, timeout=timeout,
     )
     if r.returncode != 0 or not r.stdout:
@@ -106,28 +107,29 @@ def adb_screencap_png(timeout=15):
     return r.stdout
 
 
-def adb_tap(x, y):
-    r = run_adb(f"shell input tap {int(x)} {int(y)}")
+def adb_tap(serial, x, y):
+    r = run_adb(f"shell input tap {int(x)} {int(y)}", serial=serial)
     if r.returncode != 0:
         raise RuntimeError(r.stderr or "input tap 失败")
 
 
-def adb_swipe(x1, y1, x2, y2, dur=200):
-    r = run_adb(f"shell input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(dur)}")
+def adb_swipe(serial, x1, y1, x2, y2, dur=200):
+    r = run_adb(f"shell input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(dur)}",
+                serial=serial)
     if r.returncode != 0:
         raise RuntimeError(r.stderr or "input swipe 失败")
 
 
-def adb_keyevent(code):
-    r = run_adb(f"shell input keyevent {int(code)}")
+def adb_keyevent(serial, code):
+    r = run_adb(f"shell input keyevent {int(code)}", serial=serial)
     if r.returncode != 0:
         raise RuntimeError(r.stderr or "input keyevent 失败")
 
 
-def adb_text(text):
+def adb_text(serial, text):
     # 空格需转义为 %s，其它特殊字符简单处理
     safe = text.replace(" ", "%s").replace("'", "")
-    r = run_adb(f"shell input text '{safe}'")
+    r = run_adb(f"shell input text '{safe}'", serial=serial)
     if r.returncode != 0:
         raise RuntimeError(r.stderr or "input text 失败")
 
@@ -259,8 +261,8 @@ def resolve_host_ip():
     return "127.0.0.1"
 
 
-def get_screen_size():
-    r = run_adb("shell wm size")
+def get_screen_size(serial):
+    r = run_adb("shell wm size", serial=serial)
     # "Physical size: 1080x2400"  (可能还有 Override size)
     w = h = None
     for line in r.stdout.splitlines():
@@ -273,28 +275,31 @@ def get_screen_size():
     return w, h
 
 
-def get_status():
-    r = run_adb("devices")
-    devices = [l.split("\t")[0] for l in r.stdout.strip().splitlines()[1:]
-               if l.strip() and "device" in l]
+def get_status(serial=None):
+    """获取指定设备（默认第一台）的状态。"""
+    devices = list_devices()
+    if serial is None or not any(d["serial"] == serial for d in devices):
+        serial = default_serial()
     status = {
-        "device": devices[0] if devices else None,
+        "device": serial,
+        "devices": devices,
         "device_connected": bool(devices),
         "webview": None,
         "current_url": None,
         "screen": None,
     }
-    if devices:
-        w, h = get_screen_size()
+    if serial:
+        w, h = get_screen_size(serial)
         if w:
             status["screen"] = {"width": w, "height": h}
+        streamer = get_streamer(serial)
         status["scrcpy"] = streamer._server_path is not None
         status["streaming"] = streamer.is_alive()
         try:
-            cdp.setup()
+            cdp.setup(serial)
             status["webview"] = True
-            status["current_url"] = cdp.current_url
-        except CDPError as e:
+            status["current_url"] = cdp.current_url(serial)
+        except Exception as e:
             status["webview"] = False
             status["webview_error"] = str(e)
     return status
@@ -315,23 +320,24 @@ def _pick_targets(pages):
     return out
 
 
-def get_webview_targets():
-    """汇总可调试目标：手机 WebView（9222，经 adb forward）+ 本机 Chrome（9333）。
+def get_webview_targets(serial=None):
+    """汇总可调试目标：指定设备 WebView（按设备槽位端口）。
 
-    手机源复用 cdp.setup()（幂等，自动建 adb forward 并刷新目标）；
-    本机 Chrome 源直接读 9333（由 Chrome Debug.app 启动）。
+    复用 cdp.setup()（幂等，自动建 adb forward 并刷新目标）。
     """
-    result = {"phone": [], "phone_error": None, "chrome": [], "chrome_error": None}
+    result = {"device": serial, "phone": [], "phone_error": None}
     try:
-        cdp.setup()
+        if serial is None:
+            serial = default_serial()
+        if serial is None:
+            raise CDPError("未检测到已连接的设备（adb devices 为空）")
+        cdp.setup(serial)
+        serials = [d["serial"] for d in list_devices()]
+        port = resolve_port(serial, CDP_PORT, serials)
         result["phone"] = _pick_targets(
-            _http_get_json(f"http://127.0.0.1:{CDP_PORT}/json"))
+            _http_get_json(f"http://127.0.0.1:{port}/json"))
     except Exception as e:
         result["phone_error"] = str(e)
-    try:
-        result["chrome"] = _pick_targets(_http_get_json("http://127.0.0.1:9333/json"))
-    except Exception as e:
-        result["chrome_error"] = str(e)
     return result
 
 
@@ -423,13 +429,23 @@ def _ws_pump(src, dst, mask_key, fin_flag):
             return False
 
 
-def handle_cdp_proxy(browser_sock, target_id):
-    """浏览器 WebSocket <-> 手机 CDP 双向代理。
+def handle_cdp_proxy(browser_sock, target_id, serial=None):
+    """浏览器 WebSocket <-> 指定设备 CDP 双向代理。
 
     browser_sock 已由 Handler 完成握手；target 侧复用 cdp.WebSocketClient
     （握手不带 Origin，Android WebView 的 9222 才能 101）。
     """
-    upstream = WebSocketClient(f"ws://127.0.0.1:{CDP_PORT}/devtools/page/{target_id}")
+    if serial is None:
+        serial = default_serial()
+    if serial is None:
+        try:
+            _write_ws_frame(browser_sock, 0x8, b"", fin=True)
+        except Exception:
+            pass
+        return
+    serials = [d["serial"] for d in list_devices()]
+    port = resolve_port(serial, CDP_PORT, serials)
+    upstream = WebSocketClient(f"ws://127.0.0.1:{port}/devtools/page/{target_id}")
     try:
         upstream.connect()
     except Exception as e:
@@ -437,7 +453,7 @@ def handle_cdp_proxy(browser_sock, target_id):
             _write_ws_frame(browser_sock, 0x8, b"", fin=True)
         except Exception:
             pass
-        sys.stderr.write(f"[h5-tool] CDP 代理上游连接失败 {target_id}: {e}\n")
+        sys.stderr.write(f"[h5-tool] CDP 代理上游连接失败 {serial}/{target_id}: {e}\n")
         return
     upstream_sock = upstream.sock
 
@@ -603,8 +619,17 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
-    def _stream_video(self):
-        """订阅 scrcpy 视频流，以 chunked 二进制形式转发给浏览器（WebCodecs 解码）。"""
+    def _stream_video(self, serial=None):
+        """订阅指定设备 scrcpy 视频流，以 chunked 二进制形式转发给浏览器（WebCodecs 解码）。"""
+        if serial is None:
+            serial = default_serial()
+        if serial is None:
+            try:
+                self.wfile.write(b"0\r\n\r\n")
+            except Exception:
+                pass
+            return
+        streamer = get_streamer(serial)
         # 先发响应头，让浏览器立刻进入连接态；scrcpy 启动时数据稍后到达。
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
@@ -710,6 +735,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send_bytes(data, ctype, cache=3600)
 
     # ---------- 路由 ----------
+    def _query_device(self):
+        """从 GET query string 提取 device 参数（无则返回 None）。"""
+        from urllib.parse import urlparse, parse_qs
+        q = parse_qs(urlparse(self.path).query)
+        vals = q.get("device")
+        return vals[0] if vals else None
+
     def do_OPTIONS(self):
         origin = self.headers.get("Origin") or "*"
         self.send_response(204)
@@ -721,19 +753,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        device = self._query_device()
         try:
             if path == "/" or path == "/index.html":
                 self._serve_static("index.html")
             elif path == "/devtools.html":
                 self._serve_static("devtools.html")
             elif path == "/api/status":
-                self._send_json(get_status())
+                self._send_json(get_status(device))
+            elif path == "/api/devices":
+                self._send_json({"devices": list_devices(),
+                                 "default": default_serial()})
             elif path == "/api/webview-targets":
-                self._send_json(get_webview_targets())
+                self._send_json(get_webview_targets(device))
             elif path == "/api/screenshot":
-                self._send_bytes(adb_screencap_png(), "image/png")
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                self._send_bytes(adb_screencap_png(device), "image/png")
             elif path == "/api/stream":
-                self._stream_video()
+                self._stream_video(device)
             elif path == "/api/claude-latency":
                 self._send_json(claude_latency_probe())
             elif path.startswith("/cdp-ws/"):
@@ -755,7 +795,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self.connection.sendall(resp.encode())
                 self.close_connection = True
-                handle_cdp_proxy(self.connection, target_id)
+                handle_cdp_proxy(self.connection, target_id, serial=device)
             elif path.startswith("/devtools/"):
                 self._serve_devtools(path[len("/devtools/"):])
             elif path.startswith("/"):
@@ -771,6 +811,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         try:
             body = self._read_body()
+            device = body.get("device") or self._query_device()
             if path == "/api/navigate":
                 url = (body.get("url") or "").strip()
                 if not url:
@@ -782,34 +823,50 @@ class Handler(BaseHTTPRequestHandler):
                 url = resolved
                 if not url.startswith(("http://", "https://", "file://", "about:")):
                     url = "https://" + url
-                cdp.navigate(url)
-                self._send_json({"ok": True, "url": url,
+                cdp.navigate(url, serial=device)
+                self._send_json({"ok": True, "url": url, "device": device,
                                  "ip": host_ip, "replaced_ip": replaced_ip})
 
             elif path == "/api/eval":
                 expr = body.get("expression") or ""
                 if not expr.strip():
                     return self._send_json({"error": "缺少 expression"}, 400)
-                result = cdp.evaluate(expr)
-                self._send_json({"ok": True, **simplify_eval(result)})
+                result = cdp.evaluate(expr, serial=device)
+                self._send_json({"ok": True, "device": device, **simplify_eval(result)})
 
             elif path == "/api/tap":
-                adb_tap(body["x"], body["y"])
-                self._send_json({"ok": True})
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                adb_tap(device, body["x"], body["y"])
+                self._send_json({"ok": True, "device": device})
 
             elif path == "/api/swipe":
-                adb_swipe(body["x1"], body["y1"], body["x2"], body["y2"],
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                adb_swipe(device, body["x1"], body["y1"], body["x2"], body["y2"],
                           body.get("dur", 200))
-                self._send_json({"ok": True})
+                self._send_json({"ok": True, "device": device})
 
             elif path == "/api/key":
                 # 常用：back=4, home=3, enter=66, back-space=67
-                adb_keyevent(body.get("code", 4))
-                self._send_json({"ok": True})
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                adb_keyevent(device, body.get("code", 4))
+                self._send_json({"ok": True, "device": device})
 
             elif path == "/api/text":
-                adb_text(body.get("text", ""))
-                self._send_json({"ok": True})
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                adb_text(device, body.get("text", ""))
+                self._send_json({"ok": True, "device": device})
 
             elif path == "/api/kill-port":
                 try:

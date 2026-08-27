@@ -15,6 +15,7 @@ h5-tool MCP server —— 把本地 h5-tool 后端的 HTTP 接口封装成 MCP �
 """
 import json
 import os
+import urllib.parse
 import urllib.request
 from mcp.server.fastmcp import FastMCP, Image
 
@@ -25,15 +26,23 @@ BASE = os.environ.get("H5_TOOL_URL", "http://127.0.0.1:12787")
 mcp = FastMCP("h5-tool")
 
 
-def _get(path):
-    with urllib.request.urlopen(f"{BASE}{path}", timeout=20) as r:
+def _get(path, device=None):
+    url = f"{BASE}{path}"
+    if device:
+        sep = "&" if "?" in url else "?"
+        url += f"{sep}device={urllib.parse.quote(device)}"
+    with urllib.request.urlopen(url, timeout=20) as r:
         return r.read(), r.headers.get("Content-Type", "")
 
 
-def _post(path, payload):
+def _post(path, payload, device=None):
     data = json.dumps(payload).encode("utf-8")
+    url = f"{BASE}{path}"
+    if device:
+        sep = "&" if "?" in url else "?"
+        url += f"{sep}device={urllib.parse.quote(device)}"
     req = urllib.request.Request(
-        f"{BASE}{path}", data=data,
+        url, data=data,
         headers={"Content-Type": "application/json"}, method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -41,18 +50,28 @@ def _post(path, payload):
 
 
 @mcp.tool()
-def h5_status() -> str:
-    """查看手机连接状态、WebView 状态、屏幕分辨率、scrcpy 流状态。"""
+def h5_devices() -> str:
+    """列出当前连接的所有 Android 设备（serial + model），并标注默认设备。"""
     try:
-        body, _ = _get("/api/status")
+        body, _ = _get("/api/devices")
+        return body.decode("utf-8", "replace")
+    except Exception as e:
+        return f"获取设备列表失败：{e}（h5-tool 后端未启动？）"
+
+
+@mcp.tool()
+def h5_status(device: str = None) -> str:
+    """查看指定设备（默认第一台）的连接状态、WebView 状态、屏幕分辨率、scrcpy 流状态。"""
+    try:
+        body, _ = _get("/api/status", device)
         return body.decode("utf-8", "replace")
     except Exception as e:
         return f"获取状态失败：{e}（h5-tool 后端未启动？）"
 
 
 @mcp.tool()
-def h5_screenshot() -> Image:
-    """截取手机当前全屏画面并以图片形式返回。
+def h5_screenshot(device: str = None) -> Image:
+    """截取指定设备（默认第一台）当前全屏画面并以图片形式返回。
 
     ⚠️ 重要：返回的 PNG 经 scrcpy 采集，通常是【降采样】过的，
     分辨率往往【小于】设备真实分辨率（例如设备 1080x2400，截图只有 900x2000）。
@@ -66,14 +85,14 @@ def h5_screenshot() -> Image:
              y = round(yi / hi * H)
     对水平/垂直居中的元素，直接用 x = W/2 或 y = H/2 更稳。
     """
-    data, ctype = _get("/api/screenshot")
+    data, ctype = _get("/api/screenshot", device)
     fmt = "png" if "png" in ctype else "png"
     return Image(data=data, format=fmt)
 
 
 @mcp.tool()
-def h5_tap(x: int, y: int) -> str:
-    """在手机屏幕的【设备真实坐标】(x, y) 处点击。
+def h5_tap(x: int, y: int, device: str = None) -> str:
+    """在指定设备（默认第一台）屏幕的【设备真实坐标】(x, y) 处点击。
 
     ⚠️ 这里的 x/y 必须是设备真实分辨率下的坐标（见 h5_status 的 screen.width/height），
     而【不是】h5_screenshot 截图上的像素坐标——截图通常被降采样，二者不一致。
@@ -81,14 +100,15 @@ def h5_tap(x: int, y: int) -> str:
         x = xi / wi * W，  y = yi / hi * H
     """
     try:
-        return _post("/api/tap", {"x": int(x), "y": int(y)})
+        return _post("/api/tap", {"x": int(x), "y": int(y)}, device)
     except Exception as e:
         return f"点击失败：{e}"
 
 
 @mcp.tool()
-def h5_swipe(x1: int, y1: int, x2: int, y2: int, dur: int = 200) -> str:
-    """从 (x1,y1) 滑动到 (x2,y2)，dur 为滑动时长(毫秒，默认 200)。用于滚动/翻页/拖拽。
+def h5_swipe(x1: int, y1: int, x2: int, y2: int, dur: int = 200,
+             device: str = None) -> str:
+    """在指定设备（默认第一台）从 (x1,y1) 滑动到 (x2,y2)，dur 为滑动时长(毫秒，默认 200)。
 
     坐标同样是【设备真实坐标】，不是截图像素；若来自 h5_screenshot 请先按其文档公式换算。
     """
@@ -96,43 +116,43 @@ def h5_swipe(x1: int, y1: int, x2: int, y2: int, dur: int = 200) -> str:
         return _post("/api/swipe", {
             "x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2),
             "dur": int(dur),
-        })
+        }, device)
     except Exception as e:
         return f"滑动失败：{e}"
 
 
 @mcp.tool()
-def h5_press_key(code: int = 4) -> str:
-    """模拟系统按键。code: 4=返回, 3=主页, 66=回车, 67=删除。默认返回键(4)。"""
+def h5_press_key(code: int = 4, device: str = None) -> str:
+    """在指定设备（默认第一台）模拟系统按键。code: 4=返回, 3=主页, 66=回车, 67=删除。"""
     try:
-        return _post("/api/key", {"code": int(code)})
+        return _post("/api/key", {"code": int(code)}, device)
     except Exception as e:
         return f"按键失败：{e}"
 
 
 @mcp.tool()
-def h5_type_text(text: str) -> str:
-    """向当前焦点输入框输入文本（空格会被自动转义为 %s）。"""
+def h5_type_text(text: str, device: str = None) -> str:
+    """向指定设备（默认第一台）当前焦点输入框输入文本（空格会被自动转义为 %s）。"""
     try:
-        return _post("/api/text", {"text": text})
+        return _post("/api/text", {"text": text}, device)
     except Exception as e:
         return f"输入失败：{e}"
 
 
 @mcp.tool()
-def h5_navigate(url: str) -> str:
-    """让手机当前 WebView 导航到指定 H5 链接（自动补全 https://）。"""
+def h5_navigate(url: str, device: str = None) -> str:
+    """让指定设备（默认第一台）当前 WebView 导航到指定 H5 链接（自动补全 https://）。"""
     try:
-        return _post("/api/navigate", {"url": url})
+        return _post("/api/navigate", {"url": url}, device)
     except Exception as e:
         return f"导航失败：{e}"
 
 
 @mcp.tool()
-def h5_eval(expression: str) -> str:
-    """在手机 WebView 当前页面上下文执行 JS，返回 {value,type}。Promise 会自动 await。"""
+def h5_eval(expression: str, device: str = None) -> str:
+    """在指定设备（默认第一台）WebView 当前页面上下文执行 JS，返回 {value,type}。"""
     try:
-        return _post("/api/eval", {"expression": expression})
+        return _post("/api/eval", {"expression": expression}, device)
     except Exception as e:
         return f"执行 JS 失败：{e}"
 

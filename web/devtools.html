@@ -34,6 +34,18 @@
   }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
   .dot.on { background: var(--ok); }
+  /* 设备切换按钮组（平铺，点击切换） */
+  .device-tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; max-width: 520px; }
+  .device-tab {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 4px 12px; font: inherit; font-size: 12.5px;
+    cursor: pointer; white-space: nowrap; transition: all .15s;
+  }
+  .device-tab:hover { border-color: var(--accent); color: var(--accent); }
+  .device-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .device-tab .sub { opacity: .72; font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .device-tab.active .sub { opacity: .85; }
+  .tab-empty { color: var(--muted); font-size: 12px; }
   .target {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px 12px; margin-bottom: 8px;
@@ -71,23 +83,19 @@
 <body>
 <header>
   <h1>WebView 调试 · 复用 Chrome DevTools</h1>
+  <div class="device-tabs" id="deviceTabs" title="点击切换要调试的设备"><span class="tab-empty">加载中…</span></div>
   <a class="link" href="/">← 返回控制台</a>
 </header>
 <div class="layout">
   <div class="panel">
     <div class="section">
-      <h2><span class="dot" id="dotPhone"></span>手机 WebView（9222）</h2>
+      <h2><span class="dot" id="dotPhone"></span>手机 WebView</h2>
       <div id="phoneList"></div>
-    </div>
-    <div class="section">
-      <h2><span class="dot" id="dotChrome"></span>本机 Chrome（9333）</h2>
-      <div id="chromeList"></div>
     </div>
     <div class="hint">
       点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>
       「新窗口」独立打开。<br>
-      手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)；<br>
-      本机 Chrome 需由 Chrome Debug.app（9333）启动，且带 remote-allow-origins。
+      手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。
     </div>
   </div>
   <div id="view">
@@ -122,6 +130,14 @@ function targetSpaceOf(url) {
 }
 const fetchOpts = (opts) => Object.assign({}, opts, { targetAddressSpace: targetSpaceOf(API_BASE) });
 
+// 设备选择：URL ?device= 或 localStorage，多 tab 各选各的
+const LS_DEVICE = "h5tool.device";
+let device = new URLSearchParams(location.search).get("device") ||
+             (() => { try { return localStorage.getItem(LS_DEVICE); } catch (e) { return null; } })();
+const apiUrlDev = (path) => device
+  ? apiUrl(path) + (path.includes("?") ? "&" : "?") + "device=" + encodeURIComponent(device)
+  : apiUrl(path);
+
 const targets = {};
 const $ = (id) => document.getElementById(id);
 
@@ -135,16 +151,43 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-async function load() {
-  let data = { phone: [], chrome: [] };
+async function loadDevices() {
+  const box = $("deviceTabs");
   try {
-    const r = await fetch(apiUrl("/api/webview-targets"), fetchOpts());
+    const r = await fetch(apiUrl("/api/devices"), fetchOpts());
+    const data = await r.json();
+    if (!data.devices || !data.devices.length) {
+      box.innerHTML = '<span class="tab-empty">无设备</span>';
+      return;
+    }
+    let keep = device;
+    if (!data.devices.some((d) => d.serial === keep)) keep = data.default || data.devices[0].serial;
+    box.innerHTML = data.devices
+      .map((d) => {
+        const model = (d.model || "").replace(/_/g, " ") || "Android";
+        const active = d.serial === keep ? " active" : "";
+        return `<button class="device-tab${active}" data-serial="${d.serial}" title="序列号：${d.serial}">${model}<span class="sub">${d.serial}</span></button>`;
+      })
+      .join("");
+    if (keep !== device) { device = keep; try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {} }
+  } catch (e) {
+    box.innerHTML = '<span class="tab-empty">后端未连接</span>';
+  }
+}
+
+async function load(showLoading) {
+  let data = { phone: [], phone_error: null };
+  try {
+    // 仅切换设备时显示"加载中"，轮询刷新（每 5s）不闪
+    if (showLoading) {
+      $("phoneList").innerHTML = '<div class="empty">加载中…</div>';
+    }
+    const r = await fetch(apiUrlDev("/api/webview-targets"), fetchOpts());
     data = await r.json();
   } catch (e) {
     data.phone_error = "请求后端失败：" + e.message;
   }
   renderList("phoneList", "dotPhone", data.phone, data.phone_error);
-  renderList("chromeList", "dotChrome", data.chrome, data.chrome_error);
 }
 
 function renderList(listId, dotId, list, err) {
@@ -177,7 +220,8 @@ function devtoolsUrl(t) {
   // 走 h5-tool 本地 WebSocket 代理 /cdp-ws/<targetId>：WebView CDP server 校验 Origin，
   // 浏览器 iframe 直连 ws://127.0.0.1:9222 会被 403，代理用无 Origin 连接转发。
   // 后端地址从 config.js 取（分离模式下仍是使用者本机 127.0.0.1:12787）。
-  const bare = API_BASE.replace(/^https?:\/\//, "") + "/cdp-ws/" + t.id;
+  const qs = device ? "?device=" + encodeURIComponent(device) : "";
+  const bare = API_BASE.replace(/^https?:\/\//, "") + "/cdp-ws/" + t.id + qs;
   const panel = CFG.devtoolsPanel || "/devtools/inspector.html";
   return panel + "?ws=" + encodeURIComponent(bare);
 }
@@ -198,6 +242,25 @@ function openWindow(id) {
   window.open(devtoolsUrl(t), "_blank");
 }
 
+// 立即把设备按钮高亮切到指定 serial（纯 DOM 操作，不等后端）
+function setActiveTab(serial) {
+  document.querySelectorAll(".device-tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.serial === serial);
+  });
+}
+
+$("deviceTabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".device-tab");
+  if (!btn) return;
+  const next = btn.dataset.serial || null;
+  if (next === device) return;
+  device = next;
+  try { localStorage.setItem(LS_DEVICE, next || ""); } catch (err) {}
+  setActiveTab(next);  // 先切高亮，立即反馈
+  load(true);          // 切换设备：显示"加载中"并异步刷新
+});
+
+loadDevices();
 load();
 setInterval(load, 5000); // 目标列表每 5s 刷新（WebView 页面切换场景）
 </script>
