@@ -31,13 +31,17 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cdp import CDPError, CDPSession, run_adb
+from cdp import CDPError, CDPSession, _http_get_json, run_adb, CDP_PORT, WebSocketClient
 from scr_stream import StreamError, streamer
 
 # 进程退出时清理设备端 scrcpy server 与转发
 atexit.register(lambda: streamer.stop())
 
 WEB_DIR = Path(__file__).parent / "web"
+
+# devtools-frontend 静态资源目录（复用 Chrome DevTools UI）
+# 优先取环境变量 DEVTOOLS_DIR，否则用项目下 devtools-local/front_end
+DEVTOOLS_DIR = Path(os.environ.get("DEVTOOLS_DIR") or Path(__file__).parent / "devtools-local" / "front_end")
 
 # 全局 CDP 会话（导航/执行 JS 复用）
 cdp = CDPSession()
@@ -231,6 +235,172 @@ def get_status():
     return status
 
 
+def _pick_targets(pages):
+    """精简 CDP /json 返回的 target 字段，避免把大对象全量透传。"""
+    out = []
+    for p in pages or []:
+        out.append({
+            "id": p.get("id"),
+            "title": p.get("title", ""),
+            "url": p.get("url", ""),
+            "type": p.get("type", ""),
+            "ws": p.get("webSocketDebuggerUrl"),
+            "frontend": p.get("devtoolsFrontendUrl"),
+        })
+    return out
+
+
+def get_webview_targets():
+    """汇总可调试目标：手机 WebView（9222，经 adb forward）+ 本机 Chrome（9333）。
+
+    手机源复用 cdp.setup()（幂等，自动建 adb forward 并刷新目标）；
+    本机 Chrome 源直接读 9333（由 Chrome Debug.app 启动）。
+    """
+    result = {"phone": [], "phone_error": None, "chrome": [], "chrome_error": None}
+    try:
+        cdp.setup()
+        result["phone"] = _pick_targets(
+            _http_get_json(f"http://127.0.0.1:{CDP_PORT}/json"))
+    except Exception as e:
+        result["phone_error"] = str(e)
+    try:
+        result["chrome"] = _pick_targets(_http_get_json("http://127.0.0.1:9333/json"))
+    except Exception as e:
+        result["chrome_error"] = str(e)
+    return result
+
+
+# ---------- WebSocket 代理（CDP Origin 校验绕过） ----------
+# Android WebView（Chrome 111+ 内核）的 CDP server 会校验 WebSocket 的 Origin：
+# 浏览器 iframe（Origin=http://127.0.0.1:12787）直连 ws://127.0.0.1:9222 会被 403 拒绝。
+# 本代理作为中间层：浏览器连 h5-tool 的 /cdp-ws/<targetId>，
+# 代理用 cdp.WebSocketClient（不带 Origin）转发到 9222，实现双向透传。
+
+import hashlib
+import base64
+import struct
+
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _ws_accept(key):
+    return base64.b64encode(hashlib.sha1((key + _WS_GUID).encode()).digest()).decode()
+
+
+def _recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("连接被关闭")
+        buf += chunk
+    return buf
+
+
+def _read_ws_frame(sock):
+    """读一帧，返回 (fin, opcode, payload)。payload 已解 mask。"""
+    b0, b1 = _recv_exact(sock, 2)
+    fin = b0 & 0x80
+    opcode = b0 & 0x0F
+    masked = b1 & 0x80
+    length = b1 & 0x7F
+    if length == 126:
+        length = struct.unpack(">H", _recv_exact(sock, 2))[0]
+    elif length == 127:
+        length = struct.unpack(">Q", _recv_exact(sock, 8))[0]
+    mask = _recv_exact(sock, 4) if masked else None
+    payload = _recv_exact(sock, length) if length else b""
+    if mask:
+        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return fin, opcode, payload
+
+
+def _write_ws_frame(sock, opcode, payload, mask_key=None, fin=True):
+    """发一帧。mask_key 为 None 则不 mask（服务端→客户端方向）。"""
+    header = bytearray([0x80 | opcode] if fin else [opcode])
+    length = len(payload)
+    if length < 126:
+        header.append((0x80 if mask_key else 0) | length)
+    elif length < 65536:
+        header.append((0x80 if mask_key else 0) | 126)
+        header.extend(struct.pack(">H", length))
+    else:
+        header.append((0x80 if mask_key else 0) | 127)
+        header.extend(struct.pack(">Q", length))
+    if mask_key:
+        header.extend(mask_key)
+        payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+    sock.sendall(bytes(header) + payload)
+
+
+def _ws_pump(src, dst, mask_key, fin_flag):
+    """把 src 的帧转发到 dst。返回 False 表示应结束（close 或异常）。"""
+    while True:
+        try:
+            fin, opcode, payload = _read_ws_frame(src)
+        except Exception:
+            return False
+        if opcode == 0x8:  # close：透传后结束
+            try:
+                _write_ws_frame(dst, 0x8, payload, mask_key=mask_key)
+            except Exception:
+                pass
+            return False
+        try:
+            if opcode == 0x9:  # ping
+                _write_ws_frame(dst, 0x9, payload, mask_key=mask_key)
+            elif opcode == 0xA:  # pong
+                _write_ws_frame(dst, 0xA, payload, mask_key=mask_key)
+            else:  # text / binary / continuation
+                _write_ws_frame(dst, opcode, payload, mask_key=mask_key,
+                                fin=bool(fin))
+        except Exception:
+            return False
+
+
+def handle_cdp_proxy(browser_sock, target_id):
+    """浏览器 WebSocket <-> 手机 CDP 双向代理。
+
+    browser_sock 已由 Handler 完成握手；target 侧复用 cdp.WebSocketClient
+    （握手不带 Origin，Android WebView 的 9222 才能 101）。
+    """
+    upstream = WebSocketClient(f"ws://127.0.0.1:{CDP_PORT}/devtools/page/{target_id}")
+    try:
+        upstream.connect()
+    except Exception as e:
+        try:
+            _write_ws_frame(browser_sock, 0x8, b"", fin=True)
+        except Exception:
+            pass
+        sys.stderr.write(f"[h5-tool] CDP 代理上游连接失败 {target_id}: {e}\n")
+        return
+    upstream_sock = upstream.sock
+
+    def close_both():
+        for s in (browser_sock, upstream_sock):
+            try:
+                s.close()
+            except Exception:
+                pass
+
+    def to_upstream():
+        # 浏览器帧已 mask → 转发给 9222 需重新 mask
+        if not _ws_pump(browser_sock, upstream_sock, os.urandom(4), True):
+            close_both()
+
+    def to_browser():
+        # 9222 帧未 mask → 直接透传给浏览器
+        if not _ws_pump(upstream_sock, browser_sock, None, True):
+            close_both()
+
+    t1 = threading.Thread(target=to_upstream, daemon=True)
+    t2 = threading.Thread(target=to_browser, daemon=True)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+
 def _claude_tcp_latency(host, port=443, timeout=5.0):
     """TCP 建连延迟（直连，绕过代理，看宿主机到目标的裸延迟）。"""
     t = time.perf_counter()
@@ -339,11 +509,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_bytes(self, data, content_type):
+    def _send_bytes(self, data, content_type, cache=None):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        if cache:
+            self.send_header("Cache-Control", f"max-age={cache}")
+        else:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
@@ -410,6 +583,45 @@ class Handler(BaseHTTPRequestHandler):
         }.get(ext, "application/octet-stream")
         self._send_bytes(path.read_bytes(), ctype)
 
+    def _serve_devtools(self, rel):
+        """托管 devtools-frontend 静态资源（inspector.html 及其 js/css/资源）。
+
+        保持原始目录结构按相对路径 serve；目录未构建时给出友好提示。
+        """
+        if not DEVTOOLS_DIR.is_dir():
+            self._send_json({
+                "error": "devtools 资源未构建",
+                "hint": "设置 DEVTOOLS_DIR 指向 devtools-frontend 的 front_end 产物目录",
+            }, 404)
+            return
+        # 目录请求：跳到 inspector.html（DevTools 入口）
+        if not rel or rel.endswith("/"):
+            rel = "inspector.html"
+        path = (DEVTOOLS_DIR / rel).resolve()
+        if not str(path).startswith(str(DEVTOOLS_DIR.resolve())) or not path.is_file():
+            self._send_json({"error": "devtools: not found"}, 404)
+            return
+        ext = path.suffix.lower()
+        ctype = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".mjs": "application/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".map": "application/json; charset=utf-8",
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".jpg": "image/jpeg",
+            ".ico": "image/x-icon",
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
+            ".ttf": "font/ttf",
+            ".wasm": "application/wasm",
+        }.get(ext, "application/octet-stream")
+        # devtools 资源较大且不变，浏览器缓存 1 小时
+        self._send_bytes(path.read_bytes(), ctype, cache=3600)
+
     # ---------- 路由 ----------
     def do_OPTIONS(self):
         self.send_response(204)
@@ -423,14 +635,40 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/" or path == "/index.html":
                 self._serve_static("index.html")
+            elif path == "/devtools.html":
+                self._serve_static("devtools.html")
             elif path == "/api/status":
                 self._send_json(get_status())
+            elif path == "/api/webview-targets":
+                self._send_json(get_webview_targets())
             elif path == "/api/screenshot":
                 self._send_bytes(adb_screencap_png(), "image/png")
             elif path == "/api/stream":
                 self._stream_video()
             elif path == "/api/claude-latency":
                 self._send_json(claude_latency_probe())
+            elif path.startswith("/cdp-ws/"):
+                # WebSocket 代理：devtools 前端连本地代理，绕过 WebView CDP 的 Origin 校验
+                if self.headers.get("Upgrade", "").lower() != "websocket":
+                    return self._send_json({"error": "需要 WebSocket 连接"}, 400)
+                target_id = path[len("/cdp-ws/"):]
+                if not target_id or "/" in target_id or "?" in target_id:
+                    return self._send_json({"error": "target 无效"}, 400)
+                key = self.headers.get("Sec-WebSocket-Key", "")
+                if not key:
+                    return self._send_json({"error": "缺少 Sec-WebSocket-Key"}, 400)
+                resp = (
+                    "HTTP/1.1 101 Switching Protocols\r\n"
+                    "Upgrade: websocket\r\n"
+                    "Connection: Upgrade\r\n"
+                    f"Sec-WebSocket-Accept: {_ws_accept(key)}\r\n"
+                    "\r\n"
+                )
+                self.connection.sendall(resp.encode())
+                self.close_connection = True
+                handle_cdp_proxy(self.connection, target_id)
+            elif path.startswith("/devtools/"):
+                self._serve_devtools(path[len("/devtools/"):])
             elif path.startswith("/"):
                 self._serve_static(path.lstrip("/"))
             else:

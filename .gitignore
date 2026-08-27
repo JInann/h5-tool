@@ -13,3 +13,6 @@ venv/
 
 # macOS
 .DS_Store
+
+# devtools-frontend 构建产物（438MB，按需用 DEVTOOLS_DIR 指向构建目录）
+devtools-local/
