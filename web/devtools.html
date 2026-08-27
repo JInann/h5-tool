@@ -96,7 +96,32 @@
   </div>
 </div>
 
+<script src="config.js"></script>
 <script>
+// 后端地址解析（与 app.js 保持一致）：config.js > localStorage > URL 参数
+const CFG = window.H5TOOL_CONFIG || {};
+const LS_BACKEND = "h5tool.backend";
+function resolveBackend() {
+  const q = new URLSearchParams(location.search).get("backend");
+  if (q) { try { localStorage.setItem(LS_BACKEND, q); } catch (e) {} return q.replace(/\/+$/, ""); }
+  const ls = localStorage.getItem(LS_BACKEND);
+  if (ls) return ls.replace(/\/+$/, "");
+  return (CFG.backend || "").replace(/\/+$/, "");
+}
+const API_BASE = resolveBackend();
+const apiUrl = (path) => API_BASE + path;
+function targetSpaceOf(url) {
+  try {
+    const h = new URL(url).hostname;
+    if (h === "127.0.0.1" || h === "localhost" || h === "::1" || h === "[::1]") return "loopback";
+    if (h.startsWith("10.") || h.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(h) || h.startsWith("169.254.") ||
+        h.endsWith(".local")) return "local";
+    return "public";
+  } catch (e) { return "public"; }
+}
+const fetchOpts = (opts) => Object.assign({}, opts, { targetAddressSpace: targetSpaceOf(API_BASE) });
+
 const targets = {};
 const $ = (id) => document.getElementById(id);
 
@@ -113,7 +138,7 @@ function truncate(s, n) {
 async function load() {
   let data = { phone: [], chrome: [] };
   try {
-    const r = await fetch("/api/webview-targets");
+    const r = await fetch(apiUrl("/api/webview-targets"), fetchOpts());
     data = await r.json();
   } catch (e) {
     data.phone_error = "请求后端失败：" + e.message;
@@ -151,8 +176,10 @@ function devtoolsUrl(t) {
   // devtools-frontend 会自己给 ws 参数加 ws:// 前缀（Connections.ts），所以不带协议。
   // 走 h5-tool 本地 WebSocket 代理 /cdp-ws/<targetId>：WebView CDP server 校验 Origin，
   // 浏览器 iframe 直连 ws://127.0.0.1:9222 会被 403，代理用无 Origin 连接转发。
-  const bare = "127.0.0.1:12787/cdp-ws/" + t.id;
-  return "/devtools/inspector.html?ws=" + encodeURIComponent(bare);
+  // 后端地址从 config.js 取（分离模式下仍是使用者本机 127.0.0.1:12787）。
+  const bare = API_BASE.replace(/^https?:\/\//, "") + "/cdp-ws/" + t.id;
+  const panel = CFG.devtoolsPanel || "/devtools/inspector.html";
+  return panel + "?ws=" + encodeURIComponent(bare);
 }
 
 function openTarget(id) {

@@ -16,3 +16,6 @@ venv/
 
 # devtools-frontend 构建产物（438MB，按需用 DEVTOOLS_DIR 指向构建目录）
 devtools-local/
+
+# 前端部署产物（前后端分离模式打包用）
+dist/

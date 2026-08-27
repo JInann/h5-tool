@@ -119,6 +119,24 @@
   .hist-item .ht { color: var(--muted); }
   .hist-item .hd { cursor: pointer; color: var(--muted); padding: 0 2px; }
   .hist-item .hd:hover { color: var(--err); }
+  /* 后端连接（前后端分离模式） */
+  #connBanner {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    background: var(--warn); color: #241a05; font-size: 13px; padding: 7px 16px;
+    flex-shrink: 0; z-index: 20;
+  }
+  #connBanner[hidden] { display: none; }
+  #connBanner button { background: #241a05; color: #fff; padding: 4px 10px; }
+  .conn-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .conn-modal[hidden] { display: none; }
+  .conn-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; width: 440px; max-width: calc(100vw - 40px);
+  }
+  .conn-card h3 { margin: 0 0 8px; font-size: 15px; }
 </style>
 </head>
 <body>
@@ -128,11 +146,17 @@
     <span><span class="dot" id="dotDevice"></span><span id="deviceLabel">检测中…</span></span>
     <span><span class="dot" id="dotWebview"></span>WebView</span>
     <a href="/devtools.html" style="color:var(--accent);text-decoration:none;font-size:13px;white-space:nowrap;">🛠 调试</a>
+    <button class="ghost" id="btnConn" style="padding:5px 11px;" title="后端连接设置">⚙ 后端</button>
     <button class="ghost" id="btnRestart" style="padding:5px 11px;">🔄 重启</button>
     <button class="ghost" id="btnRefresh" style="padding:5px 11px;">刷新状态</button>
     <span id="restartMsg" style="font-size:12px;min-width:0;"></span>
   </div>
 </header>
+
+<div id="connBanner" hidden>
+  <span>⚠ 后端未连接（<span id="connBannerUrl"></span>），请确认电脑上已启动 h5-tool 后端</span>
+  <button id="btnBannerConn">⚙ 设置</button>
+</div>
 
 <div class="layout">
   <!-- 左列：功能 -->
@@ -216,6 +240,21 @@
   </div>
 </div>
 
+<div class="conn-modal" id="connModal" hidden>
+  <div class="conn-card">
+    <h3>后端连接</h3>
+    <div class="hint" style="margin-top:0;">本页面与运行在你自己电脑上的 h5-tool 后端（Python）通信。默认 <code>127.0.0.1:12787</code>，改了端口或部署到服务器后在这里调整，保存立即生效。</div>
+    <input id="connInput" style="margin-top:10px;" placeholder="http://127.0.0.1:12787" />
+    <div class="row" style="margin-top:10px;">
+      <button id="btnConnTest" class="ghost">测试连接</button>
+      <button id="btnConnSave">保存并重连</button>
+      <button id="btnConnClose" class="ghost">关闭</button>
+    </div>
+    <div class="msg" id="connMsg"></div>
+  </div>
+</div>
+
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

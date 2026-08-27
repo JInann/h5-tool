@@ -1,8 +1,37 @@
-// H5 小工具控制台前端逻辑。与本机 py 后端（同源）通过 HTTP 通信。
+// H5 小工具控制台前端逻辑。与 py 后端通过 HTTP 通信（前后端分离：页面在服务器，后端在使用者本机）。
 const $ = (id) => document.getElementById(id);
 
+// ---------- 后端地址解析（config.js > localStorage > URL 参数） ----------
+const CFG = window.H5TOOL_CONFIG || {};
+const LS_BACKEND = "h5tool.backend";
+function resolveBackend() {
+  const q = new URLSearchParams(location.search).get("backend");
+  if (q) {
+    try { localStorage.setItem(LS_BACKEND, q); } catch (e) {}
+    return q.replace(/\/+$/, "");
+  }
+  const ls = localStorage.getItem(LS_BACKEND);
+  if (ls) return ls.replace(/\/+$/, "");
+  return (CFG.backend || "").replace(/\/+$/, "");
+}
+let API_BASE = resolveBackend();
+const apiUrl = (path) => API_BASE + path;
+// Chrome 142+ PNA/LNA：访问 loopback/local 时必须显式声明 targetAddressSpace，
+// 否则不发 preflight 直接拒绝（公网 origin → 私网 IP）。
+function targetSpaceOf(url) {
+  try {
+    const h = new URL(url).hostname;
+    if (h === "127.0.0.1" || h === "localhost" || h === "::1" || h === "[::1]") return "loopback";
+    if (h.startsWith("10.") || h.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(h) || h.startsWith("169.254.") ||
+        h.endsWith(".local")) return "local";
+    return "public";
+  } catch (e) { return "public"; }
+}
+const fetchOpts = (opts, url) => Object.assign({}, opts, { targetAddressSpace: targetSpaceOf(url || API_BASE) });
+
 async function api(path, opts) {
-  const res = await fetch(path, opts);
+  const res = await fetch(apiUrl(path), fetchOpts(opts));
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) {
     const data = await res.json();
@@ -19,9 +48,19 @@ function setMsg(el, text, ok) {
 }
 
 // ---------- 状态 ----------
+function updateConnUI(connected) {
+  const banner = $("connBanner");
+  if (connected) banner.hidden = true;
+  else {
+    banner.hidden = false;
+    $("connBannerUrl").textContent = API_BASE || "(未配置)";
+  }
+}
+
 async function refreshStatus() {
   try {
-    const s = await (await fetch("/api/status")).json();
+    const s = await (await fetch(apiUrl("/api/status"), fetchOpts())).json();
+    updateConnUI(true);
     $("dotDevice").className = "dot " + (s.device_connected ? "on" : "off");
     $("deviceLabel").textContent = s.device || "无设备";
     $("dotWebview").className = "dot " + (s.webview ? "on" : "off");
@@ -33,11 +72,49 @@ async function refreshStatus() {
       $("dotWebview").title = s.webview_error;
     }
   } catch (e) {
+    updateConnUI(false);
     $("dotDevice").className = "dot off";
     $("deviceLabel").textContent = "后端未连接";
   }
 }
 let screenSize = null;
+
+// ---------- 后端连接设置（前后端分离） ----------
+$("btnConn").onclick = () => {
+  $("connInput").value = API_BASE;
+  $("connMsg").textContent = "";
+  $("connMsg").className = "msg";
+  $("connModal").hidden = false;
+};
+$("btnConnClose").onclick = () => { $("connModal").hidden = true; };
+$("btnBannerConn").onclick = () => $("btnConn").click();
+$("connModal").addEventListener("click", (e) => {
+  if (e.target === $("connModal")) $("connModal").hidden = true;
+});
+$("btnConnTest").onclick = async () => {
+  const base = $("connInput").value.trim().replace(/\/+$/, "");
+  const m = $("connMsg");
+  if (!base) return setMsg(m, "请输入后端地址", false);
+  m.textContent = "测试中…";
+  m.className = "msg";
+  try {
+    const res = await fetch(base + "/api/status", fetchOpts({ signal: AbortSignal.timeout(3000) }, base));
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const s = await res.json();
+    setMsg(m, "✓ 连接成功" + (s.device ? "，手机：" + s.device : "，未检测到手机"), true);
+  } catch (e) {
+    setMsg(m, "✗ 连接失败：" + e.message, false);
+  }
+};
+$("btnConnSave").onclick = () => {
+  const base = $("connInput").value.trim().replace(/\/+$/, "");
+  const m = $("connMsg");
+  if (!base) return setMsg(m, "请输入后端地址", false);
+  try { localStorage.setItem(LS_BACKEND, base); } catch (e) {}
+  API_BASE = base;
+  $("connModal").hidden = true;
+  refreshStatus();
+};
 
 // ---------- 1. 发送链接（多行 + 历史记录） ----------
 const LS_ROWS = "h5tool.urlRows";
@@ -187,7 +264,7 @@ $("portCustom").addEventListener("keydown", (e) => { if (e.key === "Enter") $("b
 
 // ---------- 3. 实时镜像 + 截图/复制/下载 + 点击 ----------
 async function grabScreenshot() {
-  const res = await fetch("/api/screenshot?t=" + Date.now());
+  const res = await fetch(apiUrl("/api/screenshot?t=" + Date.now()), fetchOpts());
   if (!res.ok) throw new Error("截图失败 HTTP " + res.status);
   return await res.blob();
 }
@@ -365,7 +442,7 @@ function createScrcpyPlayer(canvasEl, ctx) {
     if (pos > 0) buf = buf.slice(pos);
   }
   async function start() {
-    const res = await fetch("/api/stream");
+    const res = await fetch(apiUrl("/api/stream"), fetchOpts());
     if (!res.ok || !res.body) throw new Error("视频流不可用（scrcpy 未启动？）");
     reader = res.body.getReader();
     try {
@@ -533,7 +610,7 @@ async function waitForServer(maxSec = 15) {
   for (let i = 0; i < maxSec; i++) {
     await new Promise((r) => setTimeout(r, 1000));
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch(apiUrl("/api/status"), fetchOpts());
       if (res.ok) return true;
     } catch (e) { /* 服务还在重启，继续等 */ }
   }
@@ -591,7 +668,7 @@ async function testClaudeLatency() {
   $("claudeProxy").textContent = "";
   $("claudeMetrics").textContent = "";
   try {
-    const r = await (await fetch("/api/claude-latency")).json();
+    const r = await (await fetch(apiUrl("/api/claude-latency"), fetchOpts())).json();
     const httpsP50 = r.https ? r.https.p50 : null;
     if (!r.ok || httpsP50 == null) {
       rate.className = "claude-rate err";

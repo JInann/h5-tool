@@ -39,9 +39,33 @@ atexit.register(lambda: streamer.stop())
 
 WEB_DIR = Path(__file__).parent / "web"
 
-# devtools-frontend 静态资源目录（复用 Chrome DevTools UI）
-# 优先取环境变量 DEVTOOLS_DIR，否则用项目下 devtools-local/front_end
-DEVTOOLS_DIR = Path(os.environ.get("DEVTOOLS_DIR") or Path(__file__).parent / "devtools-local" / "front_end")
+# devtools-frontend 静态资源（复用 Chrome DevTools UI）
+# DEVTOOLS_DIR 支持两种形态：
+#   - 本地目录：如 /path/to/front_end 或 devtools-local/front_end（默认）
+#   - 远程 URL：如 http://10.0.0.5:8080/devtools —— 反向代理拉取并本地缓存到
+#     devtools-local/.remote-cache/，前端仍统一走本地 /devtools/
+_DEVTOOLS_DIR_RAW = os.environ.get("DEVTOOLS_DIR") or str(Path(__file__).parent / "devtools-local" / "front_end")
+DEVTOOLS_REMOTE_BASE = _DEVTOOLS_DIR_RAW if _DEVTOOLS_DIR_RAW.startswith(("http://", "https://")) else None
+DEVTOOLS_DIR = Path(_DEVTOOLS_DIR_RAW) if not DEVTOOLS_REMOTE_BASE else None
+DEVTOOLS_CACHE = Path(__file__).parent / "devtools-local" / ".remote-cache"
+
+_DEVTOOLS_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".jpg": "image/jpeg",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".wasm": "application/wasm",
+}
 
 # 全局 CDP 会话（导航/执行 JS 复用）
 cdp = CDPSession()
@@ -54,12 +78,12 @@ LAUNCHD_LABEL = "com.aidog.h5-tool"
 
 
 def restart_service():
-    """通过 launchctl 重启当前 LaunchAgent 服务。
+    """通过 launchctl 重启当前 LaunchAgent 服务（仅 macOS 常驻模式）。
 
-    kickstart -k 会先 kill 旧进程、再由 launchd 拉起新进程（代码改动后生效）。
-    这里延迟 0.3s 等 HTTP 响应先发出，再用独立 session 派发，避免自身被 kill 时
-    连累 launchctl 命令。
+    Windows / 手动启动模式没有 launchctl，调用方应提示手动重启。
     """
+    if sys.platform == "win32":
+        raise RuntimeError("Windows 不支持自动重启，请手动重启服务")
     try:
         time.sleep(0.3)
         subprocess.run(
@@ -109,7 +133,32 @@ def adb_text(text):
 
 
 def kill_port(port):
-    """杀掉占用指定端口（TCP）的进程，返回被杀进程信息。"""
+    """杀掉占用指定端口（TCP）的进程，返回被杀进程信息。跨平台（lsof / netstat+taskkill）。"""
+    if sys.platform == "win32":
+        r = subprocess.run(f'netstat -ano | findstr ":{int(port)}"', shell=True,
+                           capture_output=True, text=True, timeout=10)
+        pids = set()
+        for line in r.stdout.splitlines():
+            # 行格式: TCP    127.0.0.1:12787    0.0.0.0:0    LISTENING    12345
+            if f":{port}" in line and "LISTENING" in line.upper():
+                parts = line.split()
+                if parts and parts[-1].isdigit():
+                    pids.add(parts[-1])
+        if not pids:
+            return {"port": port, "killed": [], "message": f"端口 {port} 未被占用"}
+        killed = []
+        for pid in pids:
+            name = "?"
+            try:
+                nr = subprocess.run(f'tasklist /FI "PID eq {pid}" /FO CSV /NH', shell=True,
+                                    capture_output=True, text=True, timeout=10)
+                name = nr.stdout.strip().split(",")[0].strip('"') or "?"
+            except Exception:
+                pass
+            killed.append({"pid": int(pid), "name": name})
+            subprocess.run(f"taskkill /F /PID {pid}", shell=True, timeout=10)
+        return {"port": port, "killed": killed,
+                "message": f"已释放端口 {port}，杀掉 {len(killed)} 个进程"}
     r = subprocess.run(f"lsof -ti tcp:{int(port)}", shell=True,
                        capture_output=True, text=True, timeout=10)
     pids = [p for p in r.stdout.split() if p.strip().isdigit()]
@@ -177,16 +226,32 @@ def _udp_trick_ip():
         s.close()
 
 
-def resolve_host_ip():
-    """获取手机能访问到的本机局域网 IP（优先当前连接的 WiFi）。
+def _windows_ip():
+    """Windows：解析 ipconfig 中第一个非回环 IPv4 地址。"""
+    try:
+        out = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=5).stdout
+        for m in re.finditer(r"IPv4[^\n:]*:\s*(\d+\.\d+\.\d+\.\d+)", out):
+            ip = m.group(1)
+            if ip != "127.0.0.1" and not ip.startswith("169.254."):
+                return ip
+    except Exception:
+        pass
+    return None
 
-    优先级：
-      1. Wi-Fi 硬件端口的 IP —— 手机通常连的是这个 WiFi，最准确；
-      2. 默认路由接口的 IP（以太网/VPN 等回退）；
-      3. UDP 出口探测；
-      4. 都不行则 127.0.0.1。
-    跳过 127.0.0.1 这类回环地址。
+
+def resolve_host_ip():
+    """获取手机能访问到的本机局域网 IP。
+
+    macOS 优先级：Wi-Fi 硬件端口 IP → 默认路由接口 IP → UDP 出口探测；
+    Windows：ipconfig 首个非回环 IPv4 → UDP 出口探测。
+    跳过 127.0.0.1 / 169.254.x（链路本地）。
     """
+    if sys.platform == "win32":
+        for fn in (_windows_ip, _udp_trick_ip):
+            ip = fn()
+            if ip and ip != "127.0.0.1" and ip != "0.0.0.0":
+                return ip
+        return "127.0.0.1"
     for fn in (_mac_wifi_ip, _default_route_ip, _udp_trick_ip):
         ip = fn()
         if ip and ip != "127.0.0.1" and ip != "0.0.0.0":
@@ -499,13 +564,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         sys.stderr.write("[h5-tool] %s\n" % (fmt % args))
 
-    # ---------- 工具方法 ----------
+    # PNA（Private Network Access）相关头：公网页面访问 127.0.0.1 等私网地址需要后端 opt-in。
+    # 注意：开了 ACA-PN 后不能再用 Allow-Origin: *，必须 echo 请求的 Origin；没有 Origin 时 fallback 回 *。
+    def _cors_origin(self):
+        o = self.headers.get("Origin")
+        return o if o else "*"
+
     def _send_json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._cors_origin())
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
         self.wfile.write(body)
 
@@ -517,7 +588,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", f"max-age={cache}")
         else:
             self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._cors_origin())
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
         self.wfile.write(data)
 
@@ -538,7 +610,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Transfer-Encoding", "chunked")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._cors_origin())
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
         try:
             q = streamer.subscribe()
@@ -586,12 +659,15 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_devtools(self, rel):
         """托管 devtools-frontend 静态资源（inspector.html 及其 js/css/资源）。
 
-        保持原始目录结构按相对路径 serve；目录未构建时给出友好提示。
+        支持本地目录（DEVTOOLS_DIR=本地路径）与远程反向代理（DEVTOOLS_DIR=http(s)://…）
+        两种形态；保持原始目录结构按相对路径 serve。
         """
-        if not DEVTOOLS_DIR.is_dir():
+        if DEVTOOLS_REMOTE_BASE:
+            return self._serve_devtools_remote(rel)
+        if DEVTOOLS_DIR is None or not DEVTOOLS_DIR.is_dir():
             self._send_json({
                 "error": "devtools 资源未构建",
-                "hint": "设置 DEVTOOLS_DIR 指向 devtools-frontend 的 front_end 产物目录",
+                "hint": "设置 DEVTOOLS_DIR 指向 front_end 产物目录（本地路径或 http(s):// 远程地址）",
             }, 404)
             return
         # 目录请求：跳到 inspector.html（DevTools 入口）
@@ -602,32 +678,45 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "devtools: not found"}, 404)
             return
         ext = path.suffix.lower()
-        ctype = {
-            ".html": "text/html; charset=utf-8",
-            ".js": "application/javascript; charset=utf-8",
-            ".mjs": "application/javascript; charset=utf-8",
-            ".css": "text/css; charset=utf-8",
-            ".json": "application/json; charset=utf-8",
-            ".map": "application/json; charset=utf-8",
-            ".svg": "image/svg+xml",
-            ".png": "image/png",
-            ".gif": "image/gif",
-            ".jpg": "image/jpeg",
-            ".ico": "image/x-icon",
-            ".woff": "font/woff",
-            ".woff2": "font/woff2",
-            ".ttf": "font/ttf",
-            ".wasm": "application/wasm",
-        }.get(ext, "application/octet-stream")
+        ctype = _DEVTOOLS_MIME.get(ext, "application/octet-stream")
         # devtools 资源较大且不变，浏览器缓存 1 小时
         self._send_bytes(path.read_bytes(), ctype, cache=3600)
 
+    def _serve_devtools_remote(self, rel):
+        """远程模式：从 DEVTOOLS_REMOTE_BASE 拉取资源，落盘缓存到 devtools-local/.remote-cache/。"""
+        if not rel or rel.endswith("/"):
+            rel = "inspector.html"
+        if ".." in rel or rel.startswith("/") or "\\" in rel:
+            return self._send_json({"error": "devtools: bad path"}, 400)
+        cache_path = DEVTOOLS_CACHE / rel
+        data = None
+        ctype = None
+        if cache_path.is_file():
+            data = cache_path.read_bytes()
+            ctype = _DEVTOOLS_MIME.get(cache_path.suffix.lower(), "application/octet-stream")
+        else:
+            url = f"{DEVTOOLS_REMOTE_BASE.rstrip('/')}/{rel}"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "h5-tool"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status != 200:
+                        return self._send_json({"error": f"devtools 远程 {resp.status}"}, 502)
+                    data = resp.read()
+                    ctype = resp.headers.get("Content-Type", "application/octet-stream")
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_bytes(data)
+            except Exception as e:
+                return self._send_json({"error": f"devtools 远程获取失败: {e}"}, 502)
+        self._send_bytes(data, ctype, cache=3600)
+
     # ---------- 路由 ----------
     def do_OPTIONS(self):
+        origin = self.headers.get("Origin") or "*"
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Access-Control-Request-Private-Network")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
     def do_GET(self):
@@ -734,6 +823,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, **kill_port(port)})
 
             elif path == "/api/restart":
+                if sys.platform == "win32":
+                    return self._send_json({"error": "Windows 不支持自动重启，请手动重启服务（Ctrl+C 或结束进程后重跑 run.bat）"})
                 # 异步重启：先回 200 让前端拿到响应，再触发 launchctl kickstart
                 threading.Thread(target=restart_service, daemon=True).start()
                 self._send_json({"ok": True, "message": "正在重启服务…"})
