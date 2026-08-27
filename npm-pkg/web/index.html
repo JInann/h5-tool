@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H5 小工具控制台</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #1a1d27; --panel2: #232734; --border: #2e3342;
+    --text: #e6e8ee; --muted: #8a91a3; --accent: #4c8dff; --accent2: #3a6fd4;
+    --ok: #3ecf8e; --err: #ff5c6c; --warn: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 10;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .status { display: flex; gap: 14px; margin-left: auto; font-size: 12px; color: var(--muted); align-items: center; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; background: var(--muted); }
+  .dot.on { background: var(--ok); } .dot.off { background: var(--err); }
+  .layout {
+    flex: 1; min-height: 0;
+    display: grid; grid-template-columns: 620px 1fr; gap: 16px; padding: 16px;
+    overflow: hidden;
+  }
+  /* 左列独立滚动，右列（实时镜像）固定不随左列滚动；隐藏滚动条但保留滚动 */
+  .col-left {
+    overflow-y: auto; min-height: 0; padding-right: 6px;
+    scrollbar-width: none; -ms-overflow-style: none;
+  }
+  .col-left::-webkit-scrollbar { display: none; }
+  .col-right { margin-bottom: 0; min-height: 0; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+  .col-right::-webkit-scrollbar { display: none; }
+  @media (max-width: 900px) {
+    body { height: auto; overflow: auto; }
+    .layout { display: block; height: auto; overflow: visible; }
+    .col-left, .col-right { height: auto; overflow: visible; padding-right: 0; margin-bottom: 0; }
+    .col-right { margin-bottom: 16px; }
+  }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+  /* 卡片折叠展开 */
+  .card-title {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    cursor: pointer; user-select: none; margin: 0 0 10px;
+  }
+  .card-title::after {
+    content: "▾"; font-size: 11px; color: var(--muted);
+    transition: transform .18s ease; flex-shrink: 0;
+  }
+  .card.collapsed .card-title { margin-bottom: 0; }
+  .card.collapsed .card-title::after { transform: rotate(-90deg); }
+  .card.collapsed .card-body { display: none; }
+  input, textarea {
+    width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 9px 11px; font: inherit; outline: none;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 92px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  .row { display: flex; gap: 8px; }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 9px 15px;
+    font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .15s;
+  }
+  button:hover { background: var(--accent2); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: var(--panel2); border: 1px solid var(--border); }
+  button.ghost:hover { background: var(--border); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .url-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .url-row .url-input { flex: 1; min-width: 0; }
+  .url-row .btn-del { padding: 9px 11px; color: var(--muted); }
+  .url-row .btn-del:hover { color: var(--err); border-color: var(--err); }
+  .port-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .port-btn { font-variant-numeric: tabular-nums; min-width: 68px; }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  pre.out {
+    background: #0b0d13; border: 1px solid var(--border); border-radius: 7px; padding: 11px;
+    margin: 10px 0 0; font-size: 12.5px; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto;
+  }
+  .msg { font-size: 12px; margin-top: 8px; min-height: 16px; }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  /* 屏幕镜像 */
+  #screenWrap { display: flex; flex-direction: column; align-items: center; }
+  #screenFrame {
+    position: relative; background: #000; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--border); line-height: 0; max-width: 100%;
+  }
+  #screen { display: block; max-height: calc(100vh - 260px); max-width: 100%; cursor: crosshair; }
+  #tapMark {
+    position: absolute; width: 26px; height: 26px; border: 2px solid var(--accent);
+    border-radius: 50%; margin: -13px 0 0 -13px; pointer-events: none; opacity: 0;
+    transition: opacity .1s; box-shadow: 0 0 12px var(--accent);
+  }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; align-items: center; justify-content: center; }
+  .fps { font-size: 12px; color: var(--muted); }
+  .screen-empty { color: var(--muted); font-size: 13px; line-height: 1.7; padding: 60px 20px; text-align: center; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--panel2); border: 1px solid var(--border); }
+  /* Claude 节点延迟测试 */
+  .claude-now { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .claude-rate { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .claude-rate.ok { color: var(--ok); }
+  .claude-rate.warn { color: var(--warn); }
+  .claude-rate.err { color: var(--err); }
+  .claude-rate.run { color: var(--accent); }
+  .claude-proxy { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .claude-metrics { font-size: 12.5px; color: var(--text); margin-top: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .claude-metrics b { color: var(--muted); font-weight: 500; }
+  .claude-hist { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .hist-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; padding: 6px 9px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; }
+  .hist-item .hv { font-variant-numeric: tabular-nums; }
+  .hist-item .ht { color: var(--muted); }
+  .hist-item .hd { cursor: pointer; color: var(--muted); padding: 0 2px; }
+  .hist-item .hd:hover { color: var(--err); }
+  /* 后端连接（前后端分离模式） */
+  #connBanner {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    background: var(--warn); color: #241a05; font-size: 13px; padding: 7px 16px;
+    flex-shrink: 0; z-index: 20;
+  }
+  #connBanner[hidden] { display: none; }
+  #connBanner button { background: #241a05; color: #fff; padding: 4px 10px; }
+  .conn-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .conn-modal[hidden] { display: none; }
+  .conn-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; width: 440px; max-width: calc(100vw - 40px);
+  }
+  .conn-card h3 { margin: 0 0 8px; font-size: 15px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📱 H5 小工具控制台</h1>
+  <div class="status">
+    <span><span class="dot" id="dotDevice"></span><span id="deviceLabel">检测中…</span></span>
+    <span><span class="dot" id="dotWebview"></span>WebView</span>
+    <a href="/devtools.html" style="color:var(--accent);text-decoration:none;font-size:13px;white-space:nowrap;">🛠 调试</a>
+    <button class="ghost" id="btnConn" style="padding:5px 11px;" title="后端连接设置">⚙ 后端</button>
+    <button class="ghost" id="btnRestart" style="padding:5px 11px;">🔄 重启</button>
+    <button class="ghost" id="btnRefresh" style="padding:5px 11px;">刷新状态</button>
+    <span id="restartMsg" style="font-size:12px;min-width:0;"></span>
+  </div>
+</header>
+
+<div id="connBanner" hidden>
+  <span>⚠ 后端未连接（<span id="connBannerUrl"></span>），请确认电脑上已启动 h5-tool 后端</span>
+  <button id="btnBannerConn">⚙ 设置</button>
+</div>
+
+<div class="layout">
+  <!-- 左列：功能 -->
+  <div class="col-left">
+    <div class="card" id="card-1">
+      <h2 class="card-title">1 · 发送链接到手机</h2>
+      <div class="card-body">
+        <div id="urlRows"></div>
+        <button class="ghost" id="btnAddRow" style="width:100%;">＋ 新增一行</button>
+        <div class="hint">每行可独立发送（回车也行）；输入内容与发送过的历史会自动保存，下次打开仍在。<br>链接里写 <code>{ip}</code> 会自动替换为本机实际 IP，例如 <code>http://{ip}:5173/GuardTeam.html</code>。</div>
+        <div class="msg" id="navMsg"></div>
+        <datalist id="urlHistory"></datalist>
+      </div>
+    </div>
+
+    <div class="card" id="card-2">
+      <h2 class="card-title">2 · 执行 JS 并获取返回值</h2>
+      <div class="card-body">
+        <textarea id="jsInput" placeholder="例如：&#10;document.title&#10;location.href&#10;JSON.stringify(window.__INITIAL_STATE__)"></textarea>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnEval">执行</button>
+          <button class="ghost" id="btnEvalClear">清空结果</button>
+        </div>
+        <pre class="out" id="jsOut" style="display:none;"></pre>
+      </div>
+    </div>
+
+    <div class="card" id="card-3">
+      <h2 class="card-title">3 · 释放端口</h2>
+      <div class="card-body">
+        <div class="port-grid" id="portGrid"></div>
+        <div class="row" style="margin-top:10px;">
+          <input id="portCustom" type="number" min="1" max="65535" placeholder="自定义端口，如 3000" />
+          <button id="btnKillCustom">释放</button>
+        </div>
+        <div class="hint">点击即杀掉占用该端口的进程（<code>lsof</code> + <code>kill -9</code>）；本工具自身端口受保护。</div>
+        <div class="msg" id="portMsg"></div>
+      </div>
+    </div>
+
+    <div class="card" id="card-5">
+      <h2 class="card-title">5 · Claude 节点延迟测试</h2>
+      <div class="card-body">
+        <div class="row">
+          <button id="btnClaudeTest">测一下</button>
+          <button class="ghost" id="btnClaudeClear">清空记录</button>
+        </div>
+        <div class="claude-now">
+          <span class="claude-rate" id="claudeRate">—</span>
+          <span id="claudeProxy" class="claude-proxy"></span>
+        </div>
+        <div class="claude-metrics" id="claudeMetrics"></div>
+        <div class="hint">测当前出口节点到 <code>api.anthropic.com</code> 的延迟：TCP 直连 + HTTPS 经代理往返（无需 API Key）。切换节点后点「测一下」即可对比；若新节点只在交互 shell 里设了代理，点右上角 🔄 重启本服务以生效。</div>
+        <div class="claude-hist" id="claudeHist"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 右列：实时屏幕（不折叠） -->
+  <div class="card col-right">
+    <h2>4 · 实时屏幕镜像 &amp; 模拟点击 <span class="badge" id="resLabel">-</span></h2>
+    <div class="toolbar">
+      <button id="btnLive">▶ 开始镜像</button>
+      <button class="ghost" id="btnShot">截图并复制</button>
+      <button class="ghost" id="btnShotDl" disabled>下载 PNG</button>
+      <button class="ghost" id="btnBack">← 返回</button>
+      <button class="ghost" id="btnHome">⌂ 主页</button>
+      <span class="fps" id="fpsLabel"></span>
+    </div>
+    <div class="msg" id="shotMsg" style="text-align:center;"></div>
+    <div id="screenWrap">
+      <div id="screenFrame">
+        <canvas id="scrcpyCanvas" alt="屏幕镜像" style="display:none; max-height:calc(100vh - 260px); max-width:100%; cursor:crosshair; background:#000;"></canvas>
+        <img id="screen" alt="屏幕镜像" style="display:none;" />
+        <div id="tapMark"></div>
+        <div class="screen-empty" id="screenEmpty">点击「开始镜像」实时查看手机屏幕。<br>支持 WebCodecs 的浏览器（Chrome / Edge）走 scrcpy 硬件编码，30–60fps 低延迟；<br>在画面上点击 = 模拟点击手机，拖动 = 滑动。</div>
+      </div>
+    </div>
+    <div class="hint" style="text-align:center;">画面点击映射为设备真实坐标；按住拖动可滑动/滚动页面。</div>
+  </div>
+</div>
+
+<div class="conn-modal" id="connModal" hidden>
+  <div class="conn-card">
+    <h3>后端连接</h3>
+    <div class="hint" style="margin-top:0;">本页面与运行在你自己电脑上的 h5-tool 后端（Python）通信。默认 <code>127.0.0.1:12787</code>，改了端口或部署到服务器后在这里调整，保存立即生效。</div>
+    <input id="connInput" style="margin-top:10px;" placeholder="http://127.0.0.1:12787" />
+    <div class="row" style="margin-top:10px;">
+      <button id="btnConnTest" class="ghost">测试连接</button>
+      <button id="btnConnSave">保存并重连</button>
+      <button id="btnConnClose" class="ghost">关闭</button>
+    </div>
+    <div class="msg" id="connMsg"></div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
