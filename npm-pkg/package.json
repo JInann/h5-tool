@@ -2,7 +2,15 @@
   "name": "@fkjs/h5-tool",
   "version": "0.1.0",
   "description": "Android WebView H5 调试小工具后端 —— npx 一键启动（ADB + CDP + scrcpy，纯 Python 标准库）",
-  "keywords": ["h5", "webview", "adb", "cdp", "scrcpy", "debug", "android"],
+  "keywords": [
+    "h5",
+    "webview",
+    "adb",
+    "cdp",
+    "scrcpy",
+    "debug",
+    "android"
+  ],
   "license": "MIT",
   "bin": {
     "h5-tool": "bin/h5-tool.js"
