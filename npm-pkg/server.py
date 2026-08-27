@@ -851,8 +851,10 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
     url = f"http://{args.host}:{args.port}/"
-    print(f"[h5-tool] 服务已启动：{url}")
-    print("[h5-tool] 在浏览器打开上面的地址即可使用控制台。按 Ctrl+C 退出。")
+    print(f"[h5-tool] 服务已启动：{url}", flush=True)
+    print("[h5-tool] 在浏览器打开上面的地址即可使用控制台。按 Ctrl+C 退出。", flush=True)
+    print("[h5-tool] 控制台（服务器部署版）：https://devtools-xhstudy-d1g9ap809fb38788a.webapps.tcloudbase.com/", flush=True)
+    print("[h5-tool] 调试面板（服务器部署版）：https://devtools-xhstudy-d1g9ap809fb38788a.webapps.tcloudbase.com/devtools.html", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
