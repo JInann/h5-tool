@@ -312,7 +312,12 @@ class ClipboardSync:
                 with self.lock:
                     self.syncing = True
                     self.error = None
-                if phone_now != self.last_phone and phone_now != self.last_mac:
+                # 非文本或空内容直接忽略，不执行同步步骤：
+                # Mac 微信截图/复制图片文件时剪贴板是图片（非文本），pbpaste 读出来是空串，
+                # 若把空串当"新内容"同步到对端，会清空/覆盖对端剪贴板，随后又被反向同步回来，
+                # 造成来回抖 + 历史里出现空行。所以哪侧读出来为空，就只跳过该方向的同步，
+                # 不往对端写空串，另一方向（如有真实内容）不受影响。
+                if phone_now and phone_now != self.last_phone and phone_now != self.last_mac:
                     # 手机复制了新内容 → 同步到 Mac（若与上次 Mac 值相同则视为回声，跳过）
                     mac_clipboard_set(phone_now)
                     self.last_mac = phone_now
@@ -321,7 +326,7 @@ class ClipboardSync:
                     # 不重读就会被下方 mac→手机 判定为"Mac 变化"再写回手机，造成来回抖
                     mac_now = mac_clipboard_get()
                 self.last_phone = phone_now
-                if mac_now != self.last_mac and mac_now != self.last_phone:
+                if mac_now and mac_now != self.last_mac and mac_now != self.last_phone:
                     # Mac 复制了新内容 → 同步到手机
                     clipboard_set(serial, mac_now)
                     self.last_phone = mac_now
