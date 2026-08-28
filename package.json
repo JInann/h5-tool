@@ -12,6 +12,10 @@
     "android"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JInann/h5-tool.git"
+  },
   "scripts": {
     "start": "node bin/h5-tool.js start"
   },
