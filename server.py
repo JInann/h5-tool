@@ -24,6 +24,7 @@ import socket
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -132,6 +133,209 @@ def adb_text(serial, text):
     r = run_adb(f"shell input text '{safe}'", serial=serial)
     if r.returncode != 0:
         raise RuntimeError(r.stderr or "input text 失败")
+
+
+# ---------- 剪贴板（adb-clip） ----------
+# 基于 polygraphene/adb-clip：通过 app_process 加载 clip.jar 访问 Android 10-16 剪贴板，
+# 无需设备上装 App。工具安装到 /data/local/tmp/clip（clip + clip.jar）。
+CLIP_BIN = "/data/local/tmp/clip"
+CLIP_RELEASE_URL = "https://github.com/polygraphene/adb-clip/releases/latest/download"
+
+
+def _shell_quote(s):
+    """为远程 shell 命令加安全的单引号包裹（内容里的特殊字符不会被远程 shell 解析）。"""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def clip_installed(serial):
+    return run_adb(f"shell [ -e {CLIP_BIN} ]", serial=serial).returncode == 0
+
+
+def clip_install(serial):
+    """从 GitHub 下载 adb-clip 并 push 到设备 /data/local/tmp。"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        clip_p, jar_p = os.path.join(tmp, "clip"), os.path.join(tmp, "clip.jar")
+        for dest, name in ((clip_p, "clip"), (jar_p, "clip.jar")):
+            urllib.request.urlretrieve(f"{CLIP_RELEASE_URL}/{name}", dest)
+        r = run_adb(f"push {shell_needed(clip_p)} {shell_needed(jar_p)} /data/local/tmp",
+                    timeout=60, serial=serial)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr or "adb push 失败")
+    run_adb(f"shell chmod 755 {CLIP_BIN}", serial=serial)
+
+
+def shell_needed(path):
+    """macOS/Linux 路径一般无空格风险，但 Downloads 场景仍稳妥加引号。"""
+    return _shell_quote(path) if (" " in path or "'" in path or ")" in path) else path
+
+
+def clipboard_get(serial):
+    r = run_adb(f"shell {CLIP_BIN}", timeout=15, serial=serial)
+    if r.returncode != 0:
+        err = (r.stderr or "").strip()
+        if "does not have foreground focus" in err or "clipboard" in err.lower():
+            raise RuntimeError("设备剪贴板不可读：请确保手机屏幕点亮且解锁")
+        raise RuntimeError(err or "读取手机剪贴板失败")
+    # app_process 输出可能带 Warnings 行，只取非空正文；结尾统一去掉一个换行
+    out = r.stdout.strip("\n")
+    return out
+
+
+def clipboard_set(serial, text):
+    r = run_adb(f"shell {CLIP_BIN} {_shell_quote(text)}", timeout=15, serial=serial)
+    if r.returncode != 0:
+        err = (r.stderr or "").strip()
+        if "does not have foreground focus" in err or "clipboard" in err.lower():
+            raise RuntimeError("设备剪贴板不可写：请确保手机屏幕点亮且解锁")
+        raise RuntimeError(err or "写入手机剪贴板失败")
+
+
+# ---------- Mac 本机剪贴板 ----------
+def mac_clipboard_get():
+    """读取 Mac（本机）剪贴板文本。Windows 用 PowerShell 实现。"""
+    try:
+        if sys.platform == "darwin":
+            r = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=5)
+            return r.stdout.rstrip("\n") if r.returncode == 0 else ""
+        if sys.platform == "win32":
+            r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                "Get-Clipboard -Raw -ErrorAction SilentlyContinue"],
+                               capture_output=True, text=True, timeout=5)
+            return r.stdout.rstrip("\r\n") if r.returncode == 0 else ""
+    except Exception:
+        pass
+    return ""
+
+
+def mac_clipboard_set(text):
+    """写入 Mac（本机）剪贴板。"""
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["pbcopy"], input=text, text=True, timeout=5)
+        elif sys.platform == "win32":
+            subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Set-Clipboard -Value $input"],
+                           input=text, text=True, timeout=5)
+    except Exception:
+        pass
+
+
+# ---------- 剪贴板双向自动同步（纯文本） ----------
+CLIP_SYNC_INTERVAL = 2.0      # 轮询间隔（秒）
+CLIP_HISTORY_LIMIT = 100      # 历史条数上限
+_clip_sync = None             # 全局同步器（main 里创建）
+
+
+class ClipboardSync:
+    """后台线程：双向同步 Mac ⇄ 手机剪贴板文本。
+
+    检测到哪边内容变了就同步到另一边；写入后更新本侧记忆值，避免回声循环。
+    """
+
+    def __init__(self, interval=CLIP_SYNC_INTERVAL):
+        self.interval = interval
+        self.lock = threading.Lock()
+        self.history = []            # [{direction, content, time, serial}]
+        self.installed = False       # clip 是否已部署到设备
+        self.installing = False      # 正在自动安装中
+        self.syncing = False         # 最近一轮是否正常同步
+        self.error = None            # 最近错误（如屏幕锁定）
+        self.serial = None           # 当前绑定设备
+        self.last_phone = None
+        self.last_mac = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True,
+                                        name="clipboard-sync")
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def ensure_installed(self, serial):
+        """自动安装 clip 到设备；成功置 installed=True。"""
+        if self.installing:
+            return
+        self.installing = True
+        try:
+            if not clip_installed(serial):
+                clip_install(serial)
+            with self.lock:
+                self.installed = True
+                self.error = None
+        except Exception as e:
+            with self.lock:
+                self.installed = False
+                self.error = str(e)
+        finally:
+            self.installing = False
+
+    def add_history(self, direction, content, serial):
+        with self.lock:
+            self.history.insert(0, {
+                "direction": direction,   # "mac" 或 "phone"
+                "content": content,
+                "time": time.strftime("%H:%M:%S"),
+                "serial": serial,
+            })
+            del self.history[CLIP_HISTORY_LIMIT:]
+
+    @staticmethod
+    def _md5_bytes(b):
+        import hashlib
+        return hashlib.md5(b).hexdigest()
+
+    @staticmethod
+    def _md5_bytes(b):
+        import hashlib
+        return hashlib.md5(b).hexdigest()
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            try:
+                serial = default_serial()
+                if not serial:
+                    with self.lock:
+                        self.syncing = False
+                    continue
+                if serial != self.serial:
+                    # 设备变化：重绑并初始化两侧基线（不触发同步）
+                    self.serial = serial
+                    try:
+                        self.last_phone = clipboard_get(serial)
+                    except Exception:
+                        self.last_phone = ""
+                    self.last_mac = mac_clipboard_get()
+                if not self.installed:
+                    self.ensure_installed(serial)
+                if not self.installed:
+                    continue
+                phone_now = clipboard_get(serial)
+                mac_now = mac_clipboard_get()
+                with self.lock:
+                    self.syncing = True
+                    self.error = None
+                if phone_now != self.last_phone and phone_now != self.last_mac:
+                    # 手机复制了新内容 → 同步到 Mac（若与上次 Mac 值相同则视为回声，跳过）
+                    mac_clipboard_set(phone_now)
+                    self.last_mac = phone_now
+                    self.add_history("phone", phone_now, serial)
+                    # phone→Mac 写入后，mac_now（旧值）一定不等于 last_mac（新值），
+                    # 不重读就会被下方 mac→手机 判定为"Mac 变化"再写回手机，造成来回抖
+                    mac_now = mac_clipboard_get()
+                self.last_phone = phone_now
+                if mac_now != self.last_mac and mac_now != self.last_phone:
+                    # Mac 复制了新内容 → 同步到手机
+                    clipboard_set(serial, mac_now)
+                    self.last_phone = mac_now
+                    self.add_history("mac", mac_now, serial)
+                self.last_mac = mac_now
+            except Exception as e:
+                with self.lock:
+                    self.error = str(e)
+                    self.syncing = False
 
 
 def kill_port(port):
@@ -619,6 +823,42 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _read_multipart(self):
+        """解析 multipart/form-data 请求体，返回 {field: (filename, bytes)}。
+
+        文件上传（文件推送 / APK 安装）用；无法解析时返回 None。
+        """
+        ctype = self.headers.get("Content-Type", "")
+        m = re.search(r'boundary=(?:"([^"]+)"|([^;]+))', ctype)
+        if not ctype.startswith("multipart/form-data") or not m:
+            return None
+        boundary = (m.group(1) or m.group(2)).encode()
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            return None
+        if not length:
+            return None
+        body = self.rfile.read(length)
+        parts = {}
+        for raw in body.split(b"--" + boundary):
+            raw = raw.strip(b"\r\n")
+            if not raw or raw == b"--":
+                continue
+            sep = raw.find(b"\r\n\r\n")
+            if sep < 0:
+                continue
+            headers = raw[:sep].decode("utf-8", "replace")
+            content = raw[sep + 4:]
+            if content.endswith(b"\r\n"):
+                content = content[:-2]
+            m1 = re.search(r'name="([^"]+)"', headers)
+            m2 = re.search(r'filename="([^"]*)"', headers)
+            if not m1:
+                continue
+            parts[m1.group(1)] = (m2.group(1) if m2 else None, content)
+        return parts
+
     def _stream_video(self, serial=None):
         """订阅指定设备 scrcpy 视频流，以 chunked 二进制形式转发给浏览器（WebCodecs 解码）。"""
         if serial is None:
@@ -776,6 +1016,36 @@ class Handler(BaseHTTPRequestHandler):
                 self._stream_video(device)
             elif path == "/api/claude-latency":
                 self._send_json(claude_latency_probe())
+            elif path == "/api/clipboard":
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                if not clip_installed(device):
+                    return self._send_json({"error": "设备未安装 clip 工具，请先点「安装到手机」"}, 409)
+                content = clipboard_get(device)
+                self._send_json({"ok": True, "content": content, "device": device})
+            elif path == "/api/clipboard/status":
+                sync = _clip_sync
+                if sync is None:
+                    return self._send_json({"enabled": False, "reason": "服务以 --no-clip-sync 启动"})
+                with sync.lock:
+                    self._send_json({
+                        "enabled": True,
+                        "installed": sync.installed,
+                        "installing": sync.installing,
+                        "syncing": sync.syncing,
+                        "error": sync.error,
+                        "device": sync.serial,
+                        "interval": sync.interval,
+                        "history": len(sync.history),
+                    })
+            elif path == "/api/clipboard/history":
+                sync = _clip_sync
+                if sync is None:
+                    return self._send_json({"items": []})
+                with sync.lock:
+                    self._send_json({"items": list(sync.history)})
             elif path.startswith("/cdp-ws/"):
                 # WebSocket 代理：devtools 前端连本地代理，绕过 WebView CDP 的 Origin 校验
                 if self.headers.get("Upgrade", "").lower() != "websocket":
@@ -810,7 +1080,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         try:
-            body = self._read_body()
+            # multipart 请求（文件上传）不能让 _read_body 抢先消费 body
+            ctype = self.headers.get("Content-Type", "")
+            is_multipart = ctype.startswith("multipart/form-data")
+            body = {} if is_multipart else self._read_body()
             device = body.get("device") or self._query_device()
             if path == "/api/navigate":
                 url = (body.get("url") or "").strip()
@@ -868,6 +1141,99 @@ class Handler(BaseHTTPRequestHandler):
                 adb_text(device, body.get("text", ""))
                 self._send_json({"ok": True, "device": device})
 
+            elif path == "/api/clipboard/push":
+                # Mac -> 手机
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                text = body.get("text")
+                if text is None:
+                    return self._send_json({"error": "缺少 text"}, 400)
+                if not clip_installed(device):
+                    return self._send_json({"error": "设备未安装 clip 工具，请先点「安装到手机」"}, 409)
+                clipboard_set(device, text)
+                self._send_json({"ok": True, "device": device, "length": len(text)})
+
+            elif path == "/api/clipboard/install":
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                clip_install(device)
+                sync = _clip_sync
+                if sync is not None:
+                    with sync.lock:
+                        sync.installed = True
+                        sync.error = None
+                self._send_json({"ok": True, "device": device,
+                                 "message": f"adb-clip 已安装到 {CLIP_BIN}"})
+
+            elif path == "/api/files/push":
+                # 文件推送：multipart 上传 → adb push 到手机
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                parts = self._read_multipart()
+                if parts is None:
+                    return self._send_json({"error": "需要 multipart/form-data 上传"}, 400)
+                filename, data = parts.get("file") or (None, None)
+                if data is None:
+                    return self._send_json({"error": "缺少 file 字段"}, 400)
+                tmp = tempfile.mkstemp(suffix=os.path.splitext(filename)[1] or ".bin")[1]
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                try:
+                    remote_dir = "/sdcard/Download/h5-tool"
+                    run_adb(f"shell mkdir -p {remote_dir}", serial=device)
+                    r = run_adb(f"push {tmp} {remote_dir}/{filename}",
+                                timeout=120, serial=device)
+                    if r.returncode != 0:
+                        raise RuntimeError(r.stderr or "adb push 失败")
+                    self._send_json({"ok": True, "device": device,
+                                     "name": filename, "size": len(data),
+                                     "remote": f"{remote_dir}/{filename}"})
+                finally:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+
+            elif path == "/api/apk/install":
+                # APK 安装：multipart 上传 .apk → adb install -r 到手机
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                parts = self._read_multipart()
+                if parts is None:
+                    return self._send_json({"error": "需要 multipart/form-data 上传"}, 400)
+                filename, data = parts.get("file") or (None, None)
+                if data is None:
+                    return self._send_json({"error": "缺少 file 字段"}, 400)
+                if not filename.lower().endswith(".apk"):
+                    return self._send_json({"error": "请选择 .apk 文件"}, 400)
+                tmp = tempfile.mkstemp(suffix=".apk")[1]
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                try:
+                    r = run_adb(f"install -r {tmp}", timeout=300, serial=device)
+                    out = (r.stdout + r.stderr).strip()
+                    if r.returncode != 0:
+                        detail = out.replace("\n", " ") or "安装失败"
+                        # 截断过长的错误信息
+                        detail = detail[:300]
+                        return self._send_json({"error": f"安装失败：{detail}"}, 500)
+                    self._send_json({"ok": True, "device": device,
+                                     "name": filename, "size": len(data),
+                                     "output": out[:200]})
+                finally:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+
             elif path == "/api/kill-port":
                 try:
                     port = int(body.get("port"))
@@ -900,10 +1266,17 @@ def main():
     parser = argparse.ArgumentParser(description="H5 小工具后端服务")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=12787)
+    parser.add_argument("--no-clip-sync", action="store_true",
+                        help="禁用剪贴板自动同步")
     args = parser.parse_args()
 
-    global SERVER_PORT
+    global SERVER_PORT, _clip_sync
     SERVER_PORT = args.port
+
+    if not args.no_clip_sync:
+        _clip_sync = ClipboardSync()
+        _clip_sync.start()
+        print("[h5-tool] 剪贴板双向自动同步已启动（每 %.1fs 检测）" % _clip_sync.interval, flush=True)
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True

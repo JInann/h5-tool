@@ -278,32 +278,224 @@ $("btnAddRow").onclick = () => { addRow(""); saveRows(); };
 loadRows().forEach((v) => addRow(v));
 renderHistory();
 
-// ---------- 2. 执行 JS ----------
-$("btnEval").onclick = async () => {
-  const expression = $("jsInput").value;
-  if (!expression.trim()) return;
-  const out = $("jsOut");
-  out.style.display = "block";
-  out.textContent = "执行中…";
-  try {
-    const r = await api("/api/eval", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expression }),
-    });
-    if (r.error) { out.textContent = "⚠ " + r.error; return; }
-    let val = r.value;
-    if (typeof val === "object") val = JSON.stringify(val, null, 2);
-    out.textContent = `// type: ${r.type}${r.subtype ? " / " + r.subtype : ""}\n${val}`;
-  } catch (e) {
-    out.textContent = "✗ " + e.message;
+// ---------- 2. 剪贴板互通（Mac ⇄ 手机自动双向同步，基于 adb-clip） ----------
+let clipItems = [];   // 历史缓存（复制按钮从原文取，避免 HTML 转义）
+
+function setClipMsg(text, ok) { setMsg($("clipMsg"), text, ok); }
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function renderClipHistory() {
+  const el = $("clipHist");
+  if (!clipItems.length) {
+    el.innerHTML = '<div class="hint" style="text-align:center;">暂无同步记录</div>';
+    return;
   }
-};
-$("btnEvalClear").onclick = () => { $("jsOut").style.display = "none"; $("jsOut").textContent = ""; };
-$("jsInput").addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") $("btnEval").click();
+  el.innerHTML = clipItems.map((it, i) => `
+    <div class="clip-item">
+      <span class="dir ${it.direction === "mac" ? "mac" : "phone"}">${it.direction === "mac" ? "Mac" : "手机"}</span>
+      <span class="content" title="${escapeHtml(it.content)}">${escapeHtml(it.content)}</span>
+      <span class="time">${it.time}</span>
+      <button class="ghost btn-copy" data-i="${i}">复制</button>
+    </div>`).join("");
+}
+
+async function refreshClipStatus() {
+  try {
+    const r = await api("/api/clipboard/status");
+    $("clipBadge").textContent = r.installed ? "已启用" : "未安装";
+    const statusEl = $("clipStatus");
+    if (r.installing) {
+      statusEl.textContent = "⏳ 正在自动安装 adb-clip 到手机…";
+    } else if (r.installed) {
+      statusEl.textContent = r.syncing
+        ? `● 双向同步中（每 ${r.interval}s 检测）`
+        : "● 同步暂停（详见下方提示）";
+      $("clipBadge").className = "badge";
+    } else {
+      statusEl.textContent = "✕ clip 未安装，双向同步未开启";
+      $("clipBadge").className = "badge";
+    }
+    $("btnClipInstall").hidden = r.installed || r.installing;
+    if (r.error) setClipMsg("⚠ " + r.error, false);
+    else if (r.installed) setClipMsg("", true);
+    return r;
+  } catch (e) {
+    setClipMsg("✗ " + e.message, false);
+    return null;
+  }
+}
+
+async function refreshClipHistory() {
+  try {
+    const r = await api("/api/clipboard/history");
+    clipItems = r.items || [];
+    renderClipHistory();
+  } catch (e) { /* 状态轮询里已报错 */ }
+}
+
+$("clipHist").addEventListener("click", async (e) => {
+  const copyBtn = e.target.closest(".btn-copy");
+  if (!copyBtn) return;
+  const item = clipItems[Number(copyBtn.dataset.i)];
+  if (!item) return;
+  try {
+    await navigator.clipboard.writeText(item.content);
+    setClipMsg(`✓ 已复制到 Mac 剪贴板（${item.content.length} 字）`, true);
+    copyBtn.textContent = "已复制";
+    setTimeout(() => { copyBtn.textContent = "复制"; }, 1500);
+  } catch (err) {
+    setClipMsg("✗ 复制失败：" + err.message, false);
+  }
 });
 
-// ---------- 3. 释放端口 ----------
+$("btnClipInstall").onclick = async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "安装中…";
+  try {
+    const r = await api("/api/clipboard/install", { method: "POST" });
+    setClipMsg("✓ " + r.message, true);
+    await refreshClipStatus();
+  } catch (err) {
+    setClipMsg("✗ 安装失败：" + err.message, false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "安装到手机";
+  }
+};
+
+// 每 3 秒轮询一次状态与历史（历史只在有更新时重绘）
+let lastHistLen = -1;
+async function pollClipboard() {
+  const st = await refreshClipStatus();
+  if (st && st.history !== lastHistLen) {
+    lastHistLen = st.history;
+    await refreshClipHistory();
+  }
+}
+setInterval(pollClipboard, 3000);
+pollClipboard();
+
+// ---------- 3. 文件推送 + APK 安装（拖拽 / 点击选择，XHR 上传带进度） ----------
+// 传输条目：{name, state: "uploading"|"pushing"|"ok"|"err", pct, msg}
+const transfers = new Map();   // id -> 条目
+
+function fmtSize(n) {
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+  return n + " B";
+}
+
+function renderTransfer(listEl, items) {
+  if (!items.length) {
+    listEl.innerHTML = "";
+    return;
+  }
+  listEl.innerHTML = items.map((t) => {
+    const stateCls = t.state === "ok" ? "ok" : t.state === "err" ? "err" : "";
+    const stateTxt = t.state === "uploading" ? `上传中 ${t.pct}%`
+      : t.state === "pushing" ? "发送到手机…"
+      : t.state === "ok" ? "✓ " + t.msg : "✗ " + t.msg;
+    return `
+    <div class="transfer-item">
+      <span class="tf-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+      <span class="tf-prog">${fmtSize(t.size)}</span>
+      <span class="tf-state ${stateCls}">${stateTxt}</span>
+    </div>
+    ${t.state === "uploading" ? `<div class="transfer-bar"><div style="width:${t.pct}%"></div></div>` : ""}`;
+  }).join("");
+}
+
+// XHR 上传（带进度回调）
+function uploadXHR(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", apiUrlDev(url));
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round(e.loaded / e.total * 100));
+    };
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300 && data && !data.error) {
+        resolve(data);
+      } else {
+        reject(new Error((data && data.error) || `HTTP ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("网络错误"));
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    xhr.send(fd);
+  });
+}
+
+// 通用上传任务（type: "push" | "apk"）
+async function transferFile(file, type) {
+  const listEl = type === "apk" ? $("apkList") : $("fileList");
+  const msgEl = type === "apk" ? $("apkMsg") : $("fileMsg");
+  const id = Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+  const item = { name: file.name, size: file.size, state: "uploading", pct: 0, msg: "" };
+  transfers.set(id, item);
+  renderTransfer(listEl, [...transfers.values()]);
+  try {
+    if (type === "apk" && !file.name.toLowerCase().endsWith(".apk")) {
+      throw new Error("请选择 .apk 文件");
+    }
+    const url = type === "apk" ? "/api/apk/install" : "/api/files/push";
+    item.state = "pushing";
+    renderTransfer(listEl, [...transfers.values()]);
+    const r = await uploadXHR(url, file, (pct) => {
+      item.pct = pct;
+      renderTransfer(listEl, [...transfers.values()]);
+    });
+    item.state = "ok";
+    item.msg = type === "apk"
+      ? `安装成功${r.output ? "：成功" : ""}` : `已到 ${r.remote}`;
+    setMsg(msgEl, type === "apk" ? `✓ ${file.name} 安装成功` : `✓ ${file.name} 已推送到手机`, true);
+  } catch (err) {
+    item.state = "err";
+    item.msg = err.message;
+    setMsg(msgEl, "✗ " + err.message, false);
+  }
+  renderTransfer(listEl, [...transfers.values()]);
+  // 保留最近 5 条
+  const arr = [...transfers.entries()];
+  if (arr.length > 5) {
+    for (const [k] of arr.slice(0, arr.length - 5)) transfers.delete(k);
+  }
+}
+
+function bindDropZone(dzEl, inputEl, type, multi) {
+  dzEl.addEventListener("click", () => inputEl.click());
+  inputEl.addEventListener("change", () => {
+    for (const f of [...inputEl.files]) transferFile(f, type);
+    inputEl.value = "";
+  });
+  ["dragenter", "dragover"].forEach((ev) => dzEl.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dzEl.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach((ev) => dzEl.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dzEl.classList.remove("dragover");
+  }));
+  dzEl.addEventListener("drop", (e) => {
+    const files = [...(e.dataTransfer.files || [])];
+    if (!files.length) return;
+    for (const f of files) transferFile(f, type);
+  });
+}
+
+bindDropZone($("fileDrop"), $("fileInput"), "push", true);
+bindDropZone($("apkDrop"), $("apkInput"), "apk", false);
+
+// ---------- 5. 释放端口 ----------
 const PRESET_PORTS = [5173, 5174, 5175, 8080, 8081];
 $("portGrid").innerHTML = PRESET_PORTS
   .map((p) => `<button class="ghost port-btn" data-port="${p}">${p}</button>`)
@@ -339,7 +531,7 @@ $("portGrid").addEventListener("click", (e) => {
 $("btnKillCustom").onclick = () => killPort($("portCustom").value, $("btnKillCustom"));
 $("portCustom").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnKillCustom").click(); });
 
-// ---------- 3. 实时镜像 + 截图/复制/下载 + 点击 ----------
+// ---------- 6. 实时镜像 + 截图/复制/下载 + 点击 ----------
 async function grabScreenshot() {
   const res = await fetch(apiUrlDev("/api/screenshot?t=" + Date.now()), fetchOpts());
   if (!res.ok) throw new Error("截图失败 HTTP " + res.status);

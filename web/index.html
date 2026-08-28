@@ -132,6 +132,34 @@
   .hist-item .ht { color: var(--muted); }
   .hist-item .hd { cursor: pointer; color: var(--muted); padding: 0 2px; }
   .hist-item .hd:hover { color: var(--err); }
+  /* 剪贴板互通 */
+  .clip-hist { margin-top: 8px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .clip-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 9px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; }
+  .clip-item .dir { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); }
+  .clip-item .dir.mac { color: var(--accent); border-color: var(--accent); }
+  .clip-item .dir.phone { color: var(--warn); border-color: var(--warn); }
+  .clip-item .content { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); cursor: default; }
+  .clip-item .time { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .clip-item .btn-copy { flex: none; padding: 2px 9px; font-size: 11px; }
+  /* 文件推送 / APK 安装 */
+  .drop-zone {
+    border: 1.5px dashed var(--border); border-radius: 10px; padding: 22px 14px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+    user-select: none;
+  }
+  .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: rgba(96, 140, 255, .06); }
+  .drop-zone .dz-icon { font-size: 26px; }
+  .drop-zone .dz-text { font-size: 13.5px; margin-top: 6px; }
+  .drop-zone .dz-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .transfer-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+  .transfer-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 9px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; }
+  .transfer-item .tf-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .transfer-item .tf-state { flex: none; font-size: 11px; color: var(--muted); }
+  .transfer-item .tf-state.ok { color: var(--accent); }
+  .transfer-item .tf-state.err { color: var(--err); }
+  .transfer-item .tf-prog { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .transfer-bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 4px; }
+  .transfer-bar > div { height: 100%; background: var(--accent); width: 0%; transition: width .15s; }
   /* 后端连接（前后端分离模式） */
   #connBanner {
     display: flex; align-items: center; justify-content: center; gap: 12px;
@@ -186,20 +214,49 @@
       </div>
     </div>
 
-    <div class="card" id="card-2">
-      <h2 class="card-title">2 · 执行 JS 并获取返回值</h2>
+    <div class="card" id="card-clip">
+      <h2 class="card-title">2 · 剪贴板互通 <span class="badge" id="clipBadge">-</span></h2>
       <div class="card-body">
-        <textarea id="jsInput" placeholder="例如：&#10;document.title&#10;location.href&#10;JSON.stringify(window.__INITIAL_STATE__)"></textarea>
-        <div class="row" style="margin-top:8px;">
-          <button id="btnEval" class="js-eval-btn">执行</button>
-          <button class="ghost" id="btnEvalClear">清空结果</button>
+        <div class="row" id="clipStatusRow">
+          <span id="clipStatus">检测中…</span>
+          <button class="ghost" id="btnClipInstall" hidden>安装到手机</button>
         </div>
-        <pre class="out" id="jsOut" style="display:none;"></pre>
+        <div class="clip-hist" id="clipHist"><div class="hint" style="text-align:center;">暂无同步记录</div></div>
+        <div class="hint">自动双向同步（仅文本）：手机复制 → 自动写入 Mac，Mac 复制 → 自动写入手机（每 2 秒检测，手机需亮屏解锁）。基于 <a href="https://github.com/polygraphene/adb-clip" target="_blank" style="color:var(--accent);">adb-clip</a>，免装 App。</div>
+        <div class="msg" id="clipMsg"></div>
+      </div>
+    </div>
+
+    <div class="card" id="card-filepush">
+      <h2 class="card-title">3 · 文件推送 <span class="badge">电脑 → 手机</span></h2>
+      <div class="card-body">
+        <div class="drop-zone" id="fileDrop">
+          <div class="dz-icon">📁</div>
+          <div class="dz-text">拖拽文件到这里，或点击选择</div>
+          <div class="dz-sub">推送到手机 <code>/sdcard/Download/h5-tool/</code></div>
+          <input type="file" id="fileInput" multiple hidden />
+        </div>
+        <div class="msg" id="fileMsg"></div>
+        <div class="transfer-list" id="fileList"></div>
+      </div>
+    </div>
+
+    <div class="card" id="card-apk">
+      <h2 class="card-title">4 · APK 安装 <span class="badge">电脑 → 手机</span></h2>
+      <div class="card-body">
+        <div class="drop-zone" id="apkDrop">
+          <div class="dz-icon">📦</div>
+          <div class="dz-text">拖拽 APK 到这里，或点击选择</div>
+          <div class="dz-sub">上传后自动 <code>adb install -r</code> 安装到手机</div>
+          <input type="file" id="apkInput" accept=".apk" hidden />
+        </div>
+        <div class="msg" id="apkMsg"></div>
+        <div class="transfer-list" id="apkList"></div>
       </div>
     </div>
 
     <div class="card" id="card-3">
-      <h2 class="card-title">3 · 释放端口</h2>
+      <h2 class="card-title">5 · 释放端口</h2>
       <div class="card-body">
         <div class="port-grid" id="portGrid"></div>
         <div class="row" style="margin-top:10px;">
@@ -212,7 +269,7 @@
     </div>
 
     <div class="card" id="card-5">
-      <h2 class="card-title">5 · Claude 节点延迟测试</h2>
+      <h2 class="card-title">6 · Claude 节点延迟测试</h2>
       <div class="card-body">
         <div class="row">
           <button id="btnClaudeTest">测一下</button>
@@ -232,7 +289,7 @@
 
   <!-- 右列：实时屏幕（不折叠） -->
   <div class="card col-right">
-    <h2>4 · 实时屏幕镜像 &amp; 模拟点击 <span class="badge" id="resLabel">-</span></h2>
+    <h2>7 · 实时屏幕镜像 &amp; 模拟点击 <span class="badge" id="resLabel">-</span></h2>
     <div class="toolbar">
       <button id="btnLive">▶ 开始镜像</button>
       <button class="ghost" id="btnShot">截图并复制</button>

@@ -106,14 +106,9 @@ run.bat               # Windows cmd / PowerShell
 
 ## 部署前端到服务器（前后端分离）
 
-前端是纯静态的 4 个文件，可部署到任意静态托管 / nginx / 对象存储：
+前端是纯静态的 4 个文件（就在 `web/` 目录，**无需打包、无需复制到 dist/**），可部署到任意静态托管 / nginx / 对象存储。
 
-```bash
-# 打包（或直接用项目根目录 dist/，已含全部最新文件）
-mkdir -p dist && cp web/index.html web/app.js web/devtools.html web/config.js dist/
-```
-
-上传 `dist/` 下 4 个文件到静态托管**根目录**（CloudBase 静态托管 / CloudStudio / 公司 nginx 均可）：
+直接把 `web/` 下这 4 个文件上传到静态托管**根目录**（CloudBase 静态托管 / CloudStudio / 公司 nginx 均可）：
 
 | 文件 | 说明 |
 |---|---|
@@ -151,7 +146,26 @@ mkdir -p dist && cp web/index.html web/app.js web/devtools.html web/config.js di
 | POST | `/api/swipe`      | `{x1,y1,x2,y2,dur, device?}` 滑动     |
 | POST | `/api/key`        | `{code, device?}` 按键（back=4, home=3） |
 | POST | `/api/text`       | `{text, device?}` 输入文本             |
+| GET  | `/api/clipboard`  | 读手机剪贴板，返回 `{content}`（需设备已装 adb-clip） |
+| GET  | `/api/clipboard/status` | 自动同步状态：`{installed, installing, syncing, error, history}` |
+| GET  | `/api/clipboard/history` | 同步历史 `{items:[{direction, content, time}]}`（上限 100 条） |
+| POST | `/api/clipboard/push` | `{text, device?}` 写手机剪贴板（Mac → 手机） |
+| POST | `/api/clipboard/install` | 从 GitHub 下载 adb-clip 并推送到设备 `/data/local/tmp/clip` |
+| POST | `/api/files/push`   | multipart 上传文件（`file` 字段）→ 推送到手机 `/sdcard/Download/h5-tool/` |
+| POST | `/api/apk/install` | multipart 上传 `.apk`（`file` 字段）→ `adb install -r` 安装到手机 |
 | POST | `/api/restart`    | 重启本服务（launchctl kickstart，代码改动后生效） |
+
+**剪贴板互通（纯文本双向同步）**：服务启动即开启后台线程，每 2 秒轮询手机与 Mac
+剪贴板——手机复制文本自动写入 Mac，Mac 复制文本自动写入手机（内置防回声，不会来回抖动）。
+基于 [adb-clip](https://github.com/polygraphene/adb-clip)（免装 App，支持 Android 10-16），
+首次启动自动从 GitHub 下载部署到设备，失败时控制台会显示「安装到手机」按钮手动兜底。
+手机屏幕必须点亮且解锁，否则系统拒绝访问剪贴板。`--no-clip-sync` 可关闭自动同步。
+支持 macOS（pbcopy/pbpaste）与 Windows（PowerShell）。
+
+**文件推送 / APK 安装**：控制台「4 · 文件推送」拖拽或点击选择文件上传 → 后端 adb push
+到手机 `/sdcard/Download/h5-tool/`；「5 · APK 安装」拖拽/选择 `.apk` → `adb install -r`
+安装到手机（安装失败返回可读错误信息）。两个模块均支持多设备 `device` 参数，
+macOS / Windows 通用。
 
 ## WebView 调试（复用 Chrome DevTools）
 
