@@ -32,6 +32,17 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+
+class QuietHTTPServer(ThreadingHTTPServer):
+    """吞掉客户端断连类异常（浏览器刷新/取消请求、探测超时断开等），
+    避免 Connection reset by peer 这类无害 traceback 刷终端。"""
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError, TimeoutError)):
+            return  # 客户端主动断开，正常现象，静默
+        super().handle_error(request, client_address)
+
 from cdp import (CDPError, CDPSession, _http_get_json, run_adb, WebSocketClient,
                  resolve_port, default_serial, list_devices, CDP_PORT)
 from scr_stream import StreamError, get_streamer, stop_all
@@ -1250,7 +1261,7 @@ def main():
         _clip_sync.start()
         print("[h5-tool] 剪贴板双向自动同步已启动（每 %.1fs 检测）" % _clip_sync.interval, flush=True)
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server = QuietHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
     url = f"http://{args.host}:{args.port}/"
     print(f"[h5-tool] 服务已启动：{url}", flush=True)
