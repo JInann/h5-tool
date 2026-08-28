@@ -29,8 +29,8 @@
 | `scr_stream.py` | scrcpy 视频流（SPS/PPS 缓存、中断降级） |
 | `web/` | 前端页面（index.html 控制台、devtools.html 调试入口） |
 | `devtools-local/front_end/` | devtools-frontend 构建产物（438MB，已 gitignore，可用远程替代） |
-| `install.sh` / `install.bat` | 一键安装脚本 |
-| `run.sh` / `run.bat` | 启动脚本 |
+| `bin/h5-tool.js` | npm CLI 入口（`start` / `status` / `stop`，负责探测 Python 并拉起 server.py） |
+| `package.json` | npm 包定义（`@fkjs/h5-tool`） |
 
 ### 依赖清单
 
@@ -45,32 +45,27 @@
 
 ## 2. 安装
 
-### 2.1 一键脚本（推荐）
+### 2.1 直接使用（npm 包）
 
 ```bash
-# macOS / Linux / Windows Git Bash / WSL
-./install.sh
-# 跳过 Node 检查（不需要 devtools 构建时）：
-./install.sh --skip-node
-# 输出每条检测明细：
-./install.sh --verbose
+# 一键启动（首次 npx 会提示安装，回车确认）
+npx @fkjs/h5-tool start
 
-# Windows cmd / PowerShell
-install.bat
-install.bat --skip-node
+# 或安装为全局命令后用 h5-tool 管理
+npm i -g @fkjs/h5-tool
+h5-tool start | status | stop
 ```
 
-脚本执行 6 步，任何一步 FAIL 会退出并给出提示：
+### 2.2 本地源码开发
 
-1. **查找 Python**：`venv` → 环境变量 `PYTHON` → workbuddy managed python（macOS 用户环境）
-   → `python3` / `python` / `py`
-2. **校验版本**：>= 3.8，过低 FAIL
-3. **查找 Node.js**（可选）：>= 18 通过；缺失/过低只 WARN；`--skip-node` 跳过
-4. **查找 adb**：缺失 WARN（手机功能不可用）
-5. **安装 Python 依赖**：有 `requirements.txt` 才装（本项目通常没有）
-6. **校验**：devtools 产物存在性 + `py_compile` 服务代码语法
+```bash
+git clone <仓库> && cd h5-tool
+npm install        # 无第三方依赖，仅生成 lock
+npm link           # 把 h5-tool 命令挂到全局，方便开发调试
+h5-tool start      # 启动后端
+```
 
-### 2.2 手动安装（脚本不可用时的兜底）
+安装前确认依赖：
 
 ```bash
 # 1) 确认 Python
@@ -78,7 +73,6 @@ python3 --version        # >= 3.8；Windows 可能是 py -3 / python
 # 2) 确认 adb
 adb devices              # 应能看到设备（手机需开 USB 调试并授权）
 # 3) 本项目无第三方 Python 依赖，不需要 pip install。
-#    若有 requirements.txt 才需要：python3 -m pip install -r requirements.txt
 # 4) devtools 产物（可选）：
 #    - 本地：把 front_end 目录放到 devtools-local/front_end/
 #    - 远程：export DEVTOOLS_DIR=http://服务器:端口/devtools （见第 5 节）
@@ -89,16 +83,16 @@ adb devices              # 应能看到设备（手机需开 USB 调试并授权
 ## 3. 启动
 
 ```bash
-./run.sh                    # macOS / Linux / Git Bash（自动探测 Python）
-run.bat                     # Windows
-# 或手动指定：
+h5-tool start                    # 前台运行，Ctrl+C 停止
+h5-tool start --port 12999       # 换端口（如 12787 被占用）
+h5-tool status                   # 检测后端是否在运行
+h5-tool stop                     # 停止（仅停本命令启动的实例）
+# 或手动指定（绕过 CLI）：
 python3 server.py --host 127.0.0.1 --port 12787
 ```
 
-`run.sh` 的 Python 探测优先级：环境变量 `PYTHON` → 项目 `venv` → workbuddy managed python
-（macOS）→ 系统 `python3`/`python`/`py`。支持 `py -3` 这类带参数的命令。
-
-启动成功后浏览器打开 <http://127.0.0.1:12787/>。
+`bin/h5-tool.js` 的 Python 探测优先级：环境变量 `PYTHON` → `python3` / `python`
+（Windows 优先 `py -3`）。启动成功后浏览器打开 <http://127.0.0.1:12787/>。
 
 ---
 
@@ -136,7 +130,7 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 | 变量 | 作用 | 示例 |
 |------|------|------|
 | `DEVTOOLS_DIR` | devtools 产物来源。**以 `http://`/`https://` 开头 = 远程反代模式**，否则当本地目录；不设置默认 `devtools-local/front_end/` | `DEVTOOLS_DIR=/data/front_end` 或 `DEVTOOLS_DIR=http://10.0.0.5:8080/devtools` |
-| `PYTHON` | 指定 python 解释器（run.sh 优先用它） | `PYTHON=/usr/bin/python3 ./run.sh` |
+| `PYTHON` | 指定 python 解释器（bin/h5-tool.js 优先用它） | `PYTHON=/usr/bin/python3 h5-tool start` |
 
 远程模式下 h5-tool 自动从服务器拉取资源并缓存到 `devtools-local/.remote-cache/`，
 前端仍统一走本地 `/devtools/`，服务器不可达时仅面板不可用、其余功能不受影响。
@@ -158,9 +152,8 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 
 | 报错 / 现象 | 原因 | 解法 |
 |------------|------|------|
-| `OSError: [Errno 48] Address already in use` / `bind 127.0.0.1:12787` 失败 | 端口被占（常驻服务或上次实例没退） | `lsof -ti tcp:12787 \| xargs kill -9` 后重启；或 `--port` 换端口 |
-| `curl /api/status` 拒绝连接 | 服务没起来 | 看启动输出/日志（macOS 常驻见第 7 节）；确认端口 |
-| macOS 上服务"时好时坏" | LaunchAgent 用极简 PATH，找不到 adb | plist 已内置 `PATH=/opt/homebrew/bin:...`；改过 plist 需 bootout+bootstrap |
+| `OSError: [Errno 48] Address already in use` / `bind 127.0.0.1:12787` 失败 | 端口被占（上次实例没退） | `lsof -ti tcp:12787 \| xargs kill -9` 后重启；或 `--port` 换端口 |
+| `curl /api/status` 拒绝连接 | 服务没起来 | 看启动终端输出；确认端口 |
 
 ### WebView / CDP 阶段
 
@@ -198,26 +191,7 @@ rsync -a out/Default/gen/front_end/ <h5-tool>/devtools-local/front_end/
 
 ---
 
-## 7. macOS 常驻（LaunchAgent）运维
-
-服务以 `com.aidog.h5-tool` LaunchAgent 常驻，登录自启、崩溃自拉起，日志在
-`<h5-tool>/h5-tool.log`（plist：`~/Library/LaunchAgents/com.aidog.h5-tool.plist`）。
-
-```bash
-# 重启（代码改动后生效）
-launchctl kickstart -k gui/$(id -u)/com.aidog.h5-tool
-# 查看状态
-launchctl print gui/$(id -u)/com.aidog.h5-tool
-# 看日志
-tail -f ~/Desktop/code/h5-tool/h5-tool.log
-```
-
-注意：plist 里 ProgramArguments 直接指定了 python 绝对路径；改 plist 需
-`launchctl bootout` + `bootstrap`。
-
----
-
-## 8. 服务器部署 devtools（可选）
+## 7. 服务器部署 devtools（可选）
 
 devtools 产物是纯静态文件，可只部署一份到服务器共享：
 
@@ -233,34 +207,34 @@ location /devtools/ {
 
 ---
 
-## 9. 一句话速查
+## 8. 一句话速查
 
-- **安装**：`./install.sh`（Windows：`install.bat`）
-- **启动**：`./run.sh`（Windows：`run.bat`）
+- **安装**：`npm i -g @fkjs/h5-tool`（或 `npx @fkjs/h5-tool start` 直接跑）
+- **启动**：`h5-tool start`（Windows 同样用 `h5-tool start`）
+- **停止**：`h5-tool stop`（或 Ctrl+C）
 - **验证**：`curl http://127.0.0.1:12787/api/status` 看 `device_connected` 和 `webview`
-- **看日志**：macOS `tail -f h5-tool.log`；Windows 看启动终端输出
+- **看日志**：启动终端输出（前台运行）
 - **服务挂了**：
-  - macOS：`lsof -ti tcp:12787 | xargs kill -9` 再重启
-  - Windows：`netstat -ano | findstr :12787` 记下 LISTENING 的 PID → `taskkill /F /PID <pid>` 再重启
+  - macOS：`lsof -ti tcp:12787 | xargs kill -9` 再 `h5-tool start`
+  - Windows：`netstat -ano | findstr :12787` 记下 LISTENING 的 PID → `taskkill /F /PID <pid>` 再启动
 - **WebView 红灯**：让客户端开 `setWebContentsDebuggingEnabled(true)`，打开 H5 页面再试
 
 ---
 
-## 10. Windows 专属注意事项
+## 9. Windows 专属注意事项
 
-代码与脚本已做跨平台兼容（`kill_port` 走 netstat+taskkill、`resolve_host_ip` 走 ipconfig、
-`/api/restart` 在 Windows 返回手动重启提示），以下为 Windows 上的额外注意点：
+代码已做跨平台兼容（`kill_port` 走 netstat+taskkill、`resolve_host_ip` 走 ipconfig），
+以下为 Windows 上的额外注意点：
 
 ### 命令差异速查
 
 | 场景 | macOS / Linux | Windows |
 |------|---------------|---------|
-| 启动 | `./run.sh` | `run.bat` 或 `py -3 server.py` |
-| 安装 | `./install.sh` | `install.bat` |
+| 启动 | `h5-tool start` | `h5-tool start`（Python 探测自动用 `py -3`） |
+| 安装 | `npm i -g @fkjs/h5-tool` | 同左 |
 | 找 Python | `python3` | `py -3` / `python`（装 Python 时勾选 Add to PATH） |
 | 释放端口 | `lsof -ti tcp:PORT \| xargs kill -9` | `netstat -ano \| findstr :PORT` → `taskkill /F /PID <pid>` |
 | 复制 devtools 产物 | `rsync -a src/ dst/` | `robocopy src dst /E`（或 `xcopy /E /I`） |
-| 查日志 | `tail -f h5-tool.log` | `type h5-tool.log` / `Get-Content h5-tool.log -Wait`（PowerShell） |
 
 ### devtools 产物获取（Windows）
 
@@ -279,7 +253,7 @@ location /devtools/ {
 - **`adb`**：确认在 PATH 中（`adb version`），手机 USB 驱动装好；Git Bash 里 `adb devices` 也能用。
 - **路径分隔符**：`DEVTOOLS_DIR` 本地目录用 Windows 路径即可（如 `D:\devtools\front_end`），
   代码用 `pathlib.Path` 处理，无需转换；远程 URL 形态无平台差异。
-- **控制台启动（`run.bat`）**：`Ctrl+C` 停止；不要关掉窗口（服务在窗口进程里）。
+- **控制台启动（`h5-tool start`）**：`Ctrl+C` 停止；不要关掉窗口（服务在窗口进程里）。
 - **防火墙**：首次启动如果手机通过局域网 IP 访问（`{ip}` 占位符），Windows 防火墙可能拦截，
   允许 `python.exe` 入站即可。
 - **scrcpy 镜像**：`scr_stream.py` 会把项目内 `scrcpy-server` 推送到手机，设备端逻辑与宿主机

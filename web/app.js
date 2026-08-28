@@ -875,44 +875,6 @@ $("btnRefresh").onclick = refreshStatus;
 refreshStatus();
 setInterval(() => { if (!living) refreshStatus(); }, 8000);
 
-// ---------- 重启服务（launchctl kickstart） ----------
-// 重启会杀掉本进程，前端先拿到 200 响应，再轮询直到服务重新起来
-async function waitForServer(maxSec = 15) {
-  for (let i = 0; i < maxSec; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-    try {
-      const res = await fetch(apiUrl("/api/status"), fetchOpts());
-      if (res.ok) return true;
-    } catch (e) { /* 服务还在重启，继续等 */ }
-  }
-  return false;
-}
-
-$("btnRestart").onclick = async () => {
-  const btn = $("btnRestart"), msg = $("restartMsg");
-  btn.disabled = true;
-  msg.textContent = "重启中…";
-  msg.style.color = "var(--warn)";
-  try {
-    await api("/api/restart", { method: "POST" });
-    const ok = await waitForServer();
-    if (ok) {
-      msg.textContent = "✓ 已重启";
-      msg.style.color = "var(--ok)";
-      refreshStatus();
-    } else {
-      msg.textContent = "✗ 重启后未恢复，请手动检查";
-      msg.style.color = "var(--err)";
-    }
-  } catch (e) {
-    msg.textContent = "✗ " + e.message;
-    msg.style.color = "var(--err)";
-  } finally {
-    btn.disabled = false;
-    setTimeout(() => { msg.textContent = ""; }, 3000);
-  }
-};
-
 // ---------- Claude 节点延迟测试 ----------
 const claudeHistory = [];
 function claudeRateOf(ms) {

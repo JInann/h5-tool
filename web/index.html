@@ -189,9 +189,7 @@
     <span><span class="dot" id="dotWebview"></span>WebView</span>
     <a href="/devtools.html" style="color:var(--accent);text-decoration:none;font-size:13px;white-space:nowrap;">🛠 调试</a>
     <button class="ghost" id="btnConn" style="padding:5px 11px;" title="后端连接设置">⚙ 后端</button>
-    <button class="ghost" id="btnRestart" style="padding:5px 11px;">🔄 重启</button>
     <button class="ghost" id="btnRefresh" style="padding:5px 11px;">刷新状态</button>
-    <span id="restartMsg" style="font-size:12px;min-width:0;"></span>
   </div>
 </header>
 
@@ -280,7 +278,7 @@
           <span id="claudeProxy" class="claude-proxy"></span>
         </div>
         <div class="claude-metrics" id="claudeMetrics"></div>
-        <div class="hint">测当前出口节点到 <code>api.anthropic.com</code> 的延迟：TCP 直连 + HTTPS 经代理往返（无需 API Key）。切换节点后点「测一下」即可对比；若新节点只在交互 shell 里设了代理，点右上角 🔄 重启本服务以生效。</div>
+        <div class="hint">测当前出口节点到 <code>api.anthropic.com</code> 的延迟：TCP 直连 + HTTPS 经代理往返（无需 API Key）。切换节点后点「测一下」即可对比；若新节点只在交互 shell 里设了代理，需重启 h5-tool 后端生效（<code>h5-tool restart</code> 或 Ctrl+C 后重新 start）。</div>
         <div class="claude-hist" id="claudeHist"></div>
       </div>
     </div>

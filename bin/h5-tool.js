@@ -57,7 +57,7 @@ async function cmdStatus() {
 
 async function cmdStop() {
   if (!fs.existsSync(PID_FILE)) {
-    console.log("未找到 pid 文件（后端可能由 launchd 常驻，用 launchctl 管理）");
+    console.log("未找到 pid 文件（后端可能未由本命令启动）");
     return;
   }
   const pid = fs.readFileSync(PID_FILE, "utf-8").trim();

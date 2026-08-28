@@ -75,27 +75,6 @@ cdp = CDPSession()
 # 本服务自身监听的端口，禁止被「释放端口」误杀
 SERVER_PORT = 12787
 
-# 本服务在 macOS launchd 中以 LaunchAgent 形式常驻，重启走 launchctl kickstart
-LAUNCHD_LABEL = "com.aidog.h5-tool"
-
-
-def restart_service():
-    """通过 launchctl 重启当前 LaunchAgent 服务（仅 macOS 常驻模式）。
-
-    Windows / 手动启动模式没有 launchctl，调用方应提示手动重启。
-    """
-    if sys.platform == "win32":
-        raise RuntimeError("Windows 不支持自动重启，请手动重启服务")
-    try:
-        time.sleep(0.3)
-        subprocess.run(
-            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"],
-            check=True, start_new_session=True, capture_output=True, timeout=10,
-        )
-        sys.stderr.write("[h5-tool] 已请求 launchctl 重启服务\n")
-    except Exception as e:
-        sys.stderr.write(f"[h5-tool] 重启失败：{e}\n")
-
 
 def adb_screencap_png(serial, timeout=15):
     """用 exec-out 直接把 PNG 从 stdout 拉回，避免落盘与 CRLF 转换。"""
@@ -1244,13 +1223,6 @@ class Handler(BaseHTTPRequestHandler):
                 if port == SERVER_PORT:
                     return self._send_json({"error": "不能释放本工具自身占用的端口"}, 400)
                 self._send_json({"ok": True, **kill_port(port)})
-
-            elif path == "/api/restart":
-                if sys.platform == "win32":
-                    return self._send_json({"error": "Windows 不支持自动重启，请手动重启服务（Ctrl+C 或结束进程后重跑 run.bat）"})
-                # 异步重启：先回 200 让前端拿到响应，再触发 launchctl kickstart
-                threading.Thread(target=restart_service, daemon=True).start()
-                self._send_json({"ok": True, "message": "正在重启服务…"})
 
             else:
                 self._send_json({"error": "not found"}, 404)

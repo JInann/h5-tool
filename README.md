@@ -4,9 +4,12 @@
 （ADB + CDP 控制 WebView），做成一个**常驻的 Web 控制台**：浏览器打开即用，前端通过 HTTP
 与宿主机上的 Python 后端通信。
 
+项目本身是一个 **npm 包**（`@fkjs/h5-tool`），通过 `h5-tool` 命令行启动/停止后端，无需
+任何安装脚本、无需配置常驻服务。
+
 支持两种运行模式：
 
-- **本地单机**：前后端同机，`./run.sh` 启动后浏览器打开 <http://127.0.0.1:12787/>。
+- **本地单机**：前后端同机，`h5-tool start` 启动后浏览器打开 <http://127.0.0.1:12787/>。
 - **前后端分离**：前端部署到服务器（静态托管），后端仍跑在**使用者自己的电脑**上
   （`127.0.0.1:12787`）——因为后端要操作 USB 连接的手机（adb / CDP / scrcpy），必须在本地。
   浏览器打开服务器页面后，页面里的 JS 跨域访问本机后端：`127.0.0.1` 指向的是浏览器所在
@@ -23,12 +26,50 @@
 5. **WebView 调试（完整 Chrome DevTools）** — 复用 Chromium 开源的 devtools-frontend，浏览器内
    直接使用 Console / Sources 断点 / Network / Storage / Elements 全套调试能力调试手机 WebView。
    控制台右上角「🛠 调试」进入，选择目标后 iframe 内嵌 DevTools（也可新窗口打开）。
+6. **MCP 接入（AI 使用）** — `mcp_server.py` 把后端 HTTP 接口封装成 MCP 工具，AI 客户端
+   （WorkBuddy 等）可直接截图看画面、点击/滑动/按键、发链接、执行 JS。
+
+## 安装与使用（npm）
+
+### 直接使用（不开发源码）
+
+```bash
+# 启动后端（前台运行，Ctrl+C 停止；首次 npx 会提示安装，回车确认）
+npx @fkjs/h5-tool start
+
+# 换端口启动（如后端 12787 已被占用）
+npx @fkjs/h5-tool start --port 12999
+
+# 检测后端是否在运行
+npx @fkjs/h5-tool status
+
+# 停止（仅停本命令启动的实例）
+npx @fkjs/h5-tool stop
+```
+
+启动后在浏览器打开 <http://127.0.0.1:12787/> 即可。
+
+### 本地源码开发
+
+```bash
+npm install        # 无第三方依赖，仅生成 lock（Python 后端纯标准库）
+npm link           # 把 h5-tool 命令挂到全局，方便开发调试
+h5-tool start      # 启动后端
+npm pack           # 打包发布产物（生成 fkjs-h5-tool-<version>.tgz，已 gitignore）
+```
+
+### 安装为全局命令
+
+```bash
+npm i -g @fkjs/h5-tool    # 或本地包：npm i -g ./fkjs-h5-tool-0.1.1.tgz
+h5-tool start
+```
 
 ## 依赖
 
 - `adb`（已在 PATH 中，且手机已连接、开启 USB 调试）
 - App 的 WebView 需开启调试（`WebView.setWebContentsDebuggingEnabled(true)`）
-- Python 3（无第三方依赖，纯标准库；CDP 的 WebSocket 是自己用 socket 实现的，不需要 node/ws）
+- Python 3（自动探测：`PYTHON` 环境变量 > `python3` > `python` > Windows `py -3`）
 - **scrcpy 视频流**：项目内已附带 `scrcpy-server`（与 scrcpy 4.0 配套）。实时镜像走 scrcpy
   硬件编码 + 浏览器 **WebCodecs** 解码。前端在支持 WebCodecs 的浏览器（Chrome / Edge）上使用
   scrcpy 管线（30–60fps、低延迟）；不支持时自动降级为原来的 PNG 轮询（约 3fps）。
@@ -37,44 +78,6 @@
   已 gitignore，不入库）。`DEVTOOLS_DIR` 环境变量支持两种形态：**本地目录** 或 **远程 URL**
   （如 `http://10.0.0.5:8080/devtools`，见下方「部署到服务器」），远程模式下自动拉取并缓存到
   `devtools-local/.remote-cache/`。缺失时 `/devtools/` 返回提示，不影响其他功能。
-
-## 使用
-
-> Agent / 自动化场景的完整安装与排障手册见 **`INSTALL.md`**（含全部报错→原因→解法对照）。
-
-### 安装依赖（首次，跨平台一键）
-
-```bash
-./install.sh          # macOS / Linux / Windows Git Bash
-# Windows cmd / PowerShell：
-install.bat
-```
-
-安装脚本流程：查找 Python（支持 venv / 环境变量 `PYTHON` / 系统 python3）→ 校验版本（>= 3.8）
-→ 查找 Node.js（可选，devtools 构建用）→ 查找 adb → 安装 Python 依赖（若有 requirements.txt）
-→ 校验 devtools 产物 → 服务代码语法校验。跳过 Node 检查：`./install.sh --skip-node`。
-
-### 启动
-
-```bash
-./run.sh              # macOS / Linux / Windows Git Bash（自动探测 Python）
-run.bat               # Windows cmd / PowerShell
-# 或： python3 server.py --host 127.0.0.1 --port 12787
-```
-
-启动后在浏览器打开 <http://127.0.0.1:12787/> 即可。
-
-#### 前后端分离模式（前端在服务器）
-
-前端（`web/` 三个页面 + `config.js`）部署到任意静态托管 / nginx，后端照常在本机 `./run.sh` 启动。
-浏览器打开**服务器上**的页面，页面会请求本机 `127.0.0.1:12787` 的后端。
-
-- 后端地址：`web/config.js` 里 `H5TOOL_CONFIG.backend`（默认 `http://127.0.0.1:12787`）；
-  也可以点页面右上角「⚙ 后端」临时改地址（存 localStorage），或 URL 加 `?backend=` 覆盖。
-- **Chrome 142+ 首次访问会弹「是否允许此网站访问本地网络」的授权框，点允许即可**（Chrome 的
-  Local Network Access 安全策略；后端已返回 `Access-Control-Allow-Private-Network: true`）。
-- 页面顶部黄色横幅「后端未连接」= 没连上后端，点横幅上的「⚙ 设置」检查地址。
-- DevTools 调试面板资源默认走 `config.js` 里的 `devtoolsPanel`（远程静态托管），无需本地构建。
 
 ## 架构
 
@@ -94,6 +97,9 @@ run.bat               # Windows cmd / PowerShell
                                          └─ adb forward tcp:27183 → 裸 H.264 字节流
                                               └─ /api/stream (chunked) → 浏览器 WebCodecs 解码到 <canvas>
 ```
+
+启动入口 `bin/h5-tool.js`（Node）负责探测本机 Python 并拉起 `server.py`，`start / status / stop`
+三个子命令管理生命周期（pid 文件在系统临时目录）。
 
 **前后端分离模式的链路**（页面在服务器，后端在使用者本机）：
 
@@ -117,7 +123,7 @@ run.bat               # Windows cmd / PowerShell
 | `devtools.html` | WebView 调试面板入口 |
 | `config.js` | 全局配置：`backend`（默认 `http://127.0.0.1:12787`）、`devtoolsPanel`（远程 DevTools 资源） |
 
-部署后使用者无需改任何配置：后端照常 `./run.sh` 本地启动，浏览器打开服务器页面即用。
+部署后使用者无需改任何配置：后端照常 `h5-tool start` 本地启动，浏览器打开服务器页面即用。
 首次访问 Chrome 可能弹「允许访问本地网络」授权框，点允许。
 
 ## HTTP 接口
@@ -153,7 +159,6 @@ run.bat               # Windows cmd / PowerShell
 | POST | `/api/clipboard/install` | 从 GitHub 下载 adb-clip 并推送到设备 `/data/local/tmp/clip` |
 | POST | `/api/files/push`   | multipart 上传文件（`file` 字段）→ 推送到手机 `/sdcard/Download/h5-tool/` |
 | POST | `/api/apk/install` | multipart 上传 `.apk`（`file` 字段）→ `adb install -r` 安装到手机 |
-| POST | `/api/restart`    | 重启本服务（launchctl kickstart，代码改动后生效） |
 
 **剪贴板互通（纯文本双向同步）**：服务启动即开启后台线程，每 2 秒轮询手机与 Mac
 剪贴板——手机复制文本自动写入 Mac，Mac 复制文本自动写入手机（内置防回声，不会来回抖动）。
@@ -219,38 +224,22 @@ export DEVTOOLS_DIR=http://服务器IP:端口/devtools
 - 手机 WebView 需开启 `setWebContentsDebuggingEnabled(true)` 才会出现在目标列表。
 - 页面导航 / WebView 重建后 target id 会变，重新在列表里点目标即可。
 
-## 后台常驻 / 开机自启（macOS launchd）
+## MCP 接入（AI 使用）
 
-已配置为 LaunchAgent：登录时自动启动，进程挂掉会自动拉起，日志写到
-`h5-tool/h5-tool.log`。配置文件：`~/Library/LaunchAgents/com.aidog.h5-tool.plist`。
-
-> 注意：`plist` 里显式补了 `PATH=/opt/homebrew/bin:...`，否则 launchd 的极简环境找不到 `adb`。
-
-常用管理命令（`gui/$(id -u)` 是当前登录用户的域）：
+`mcp_server.py` 把后端 HTTP 接口封装成 MCP 工具（stdio 传输），让 AI 客户端直接操作手机：
+截图看画面、点击/滑动/按键/输入文本、发链接到手机 WebView、执行 JS、查设备状态。
 
 ```bash
-# 启动 / 加载（首次或改完 plist 后）
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aidog.h5-tool.plist
-
-# 停止 / 卸载（改 plist 前先 bootout，再 bootstrap）
-launchctl bootout gui/$(id -u)/com.aidog.h5-tool
-
-# 立即重启
-launchctl kickstart -k gui/$(id -u)/com.aidog.h5-tool
-
-# 查看状态（state / pid / last exit code）
-launchctl print gui/$(id -u)/com.aidog.h5-tool
-
-# 看日志
-tail -f h5-tool/h5-tool.log
+# 依赖：mcp[cli]（装在 workbuddy managed venv 中）
+# 启动（由 MCP 客户端拉起）：
+python mcp_server.py
+# 后端地址可用环境变量覆盖（后端换端口时）：
+H5_TOOL_URL=http://127.0.0.1:12999 python mcp_server.py
 ```
-
-改了 `server.py` / `cdp.py` / `web/` 后，代码会在下次重启后生效：
-`launchctl kickstart -k gui/$(id -u)/com.aidog.h5-tool`。
-改了 `plist` 本身则需要先 `bootout` 再 `bootstrap`。
 
 ## 说明
 
 - 镜像画面上的坐标会按图片真实分辨率换算为设备坐标，因此点击位置准确。
 - WebView 重建（PID 变化）时，CDP 会自动重连一次。
 - 若右上角 WebView 指示灯为红色，把鼠标悬停在上面可看到具体原因。
+- 包体积 ~800KB（scrcpy-server 占大头），devtools-frontend（438MB）不入包，由远程面板替代。
