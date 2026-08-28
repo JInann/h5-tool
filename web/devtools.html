@@ -70,6 +70,29 @@
   .err { font-size: 12px; color: var(--err); }
   .empty { font-size: 12px; color: var(--muted); }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 4px; }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  /* 快捷修改地址（吸底常驻） */
+  .quick-nav {
+    position: sticky; bottom: 0; z-index: 5;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    margin: 16px -14px 0; padding: 10px 14px 4px;
+  }
+  .quick-nav h2 {
+    font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+    margin: 0 0 8px; font-weight: 600;
+  }
+  .qn-row { display: flex; gap: 8px; }
+  .qn-row input {
+    flex: 1; min-width: 0; width: 100%;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 12px; outline: none;
+  }
+  .qn-row input:focus { border-color: var(--accent); }
+  .qn-row button { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
+  .quick-nav .msg { font-size: 11px; margin-top: 6px; min-height: 14px; color: var(--muted); }
+  .quick-nav .msg.ok { color: var(--ok); }
+  .quick-nav .msg.err { color: var(--err); }
   #view { display: flex; flex-direction: column; min-height: 0; }
   #viewInfo {
     padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
@@ -96,6 +119,17 @@
       点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>
       「新窗口」独立打开。<br>
       手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。
+    </div>
+    <!-- 快捷修改地址（吸底） -->
+    <div class="quick-nav">
+      <h2>快捷修改地址</h2>
+      <div class="qn-row">
+        <input id="qnInput" list="qnHistory" placeholder="http://{ip}:5173/xx.html  或 https://example.com" />
+        <button id="qnSend">发送</button>
+      </div>
+      <div class="msg" id="qnMsg"></div>
+      <div class="hint">回车发送；<code>{ip}</code> 自动替换为本机 IP，输入与发送历史自动保存。</div>
+      <datalist id="qnHistory"></datalist>
     </div>
   </div>
   <div id="view">
@@ -263,6 +297,73 @@ $("deviceTabs").addEventListener("click", (e) => {
 loadDevices();
 load();
 setInterval(load, 5000); // 目标列表每 5s 刷新（WebView 页面切换场景）
+</script>
+
+<script>
+// ---------- 快捷修改地址（吸底常驻，独立于控制台模块1） ----------
+(() => {
+  const LS_ROWS = "h5tool.devtools.urlRows";
+  const LS_HISTORY = "h5tool.devtools.urlHistory";
+  const qnInput = document.getElementById("qnInput");
+  const qnSend = document.getElementById("qnSend");
+  const qnMsg = document.getElementById("qnMsg");
+
+  function setMsg(text, ok) {
+    qnMsg.textContent = text;
+    qnMsg.className = "msg" + (ok ? " ok" : " err");
+  }
+
+  // 历史记录（datalist 提示 + 发送成功后入列）
+  let urlHistory = [];
+  try { urlHistory = JSON.parse(localStorage.getItem(LS_HISTORY)) || []; } catch (e) {}
+  function renderHistory() {
+    document.getElementById("qnHistory").innerHTML = urlHistory
+      .map((u) => '<option value="' + u.replace(/"/g, "&quot;") + '"></option>')
+      .join("");
+  }
+  function pushHistory(url) {
+    urlHistory = [url, ...urlHistory.filter((u) => u !== url)].slice(0, 30);
+    try { localStorage.setItem(LS_HISTORY, JSON.stringify(urlHistory)); } catch (e) {}
+    renderHistory();
+  }
+
+  // 恢复上次未发送的输入
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_ROWS));
+    if (Array.isArray(saved) && saved.length && saved[0]) qnInput.value = saved[0];
+  } catch (e) {}
+
+  qnInput.addEventListener("input", () => {
+    try { localStorage.setItem(LS_ROWS, JSON.stringify([qnInput.value])); } catch (e) {}
+  });
+  qnInput.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+
+  async function send() {
+    const url = qnInput.value.trim();
+    if (!url) return setMsg("请输入链接", false);
+    qnSend.disabled = true;
+    setMsg("发送中…", true);
+    try {
+      const res = await fetch(apiUrlDev("/api/navigate"), fetchOpts({
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      }));
+      const ct = res.headers.get("content-type") || "";
+      const data = ct.includes("application/json") ? await res.json() : null;
+      if (!res.ok || (data && data.error)) throw new Error((data && data.error) || ("HTTP " + res.status));
+      let msg = "✓ 已发送到手机：" + data.url;
+      if (data.replaced_ip) msg += "（已把 {ip} 替换为 " + data.ip + "）";
+      setMsg(msg, true);
+      pushHistory(data.url);
+    } catch (e) {
+      setMsg("✗ " + e.message, false);
+    } finally {
+      qnSend.disabled = false;
+    }
+  }
+  qnSend.addEventListener("click", send);
+  renderHistory();
+})();
 </script>
 </body>
 </html>
