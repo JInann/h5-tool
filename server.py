@@ -608,29 +608,45 @@ def _write_ws_frame(sock, opcode, payload, mask_key=None, fin=True):
     sock.sendall(bytes(header) + payload)
 
 
-def _ws_pump(src, dst, mask_key, fin_flag):
-    """把 src 的帧转发到 dst。返回 False 表示应结束（close 或异常）。"""
+def _ws_pump(src, dst, dst_mask_key, reply_mask_key, dst_lock=None, reply_lock=None):
+    """把 src 的数据帧转发到 dst；对 ping/pong 按协议就地处理。
+
+    WebSocket 协议规定收到 ping 必须回复 pong，因此代理不能简单地把 ping/pong
+    跨连接转发，否则两端都收不到正确的控制帧回应，空闲时容易被误判为断连。
+
+    dst_mask_key: 转发给 dst 时使用的 mask key（None 表示不 mask）。
+    reply_mask_key: 给 src 回 pong 时使用的 mask key（None 表示不 mask）。
+    返回 False 表示应结束（close 或异常）。
+    """
+    def _write_dst(opcode, payload, fin=True):
+        if dst_lock:
+            with dst_lock:
+                _write_ws_frame(dst, opcode, payload, mask_key=dst_mask_key, fin=fin)
+        else:
+            _write_ws_frame(dst, opcode, payload, mask_key=dst_mask_key, fin=fin)
+
+    def _write_reply(opcode, payload, fin=True):
+        if reply_lock:
+            with reply_lock:
+                _write_ws_frame(src, opcode, payload, mask_key=reply_mask_key, fin=fin)
+        else:
+            _write_ws_frame(src, opcode, payload, mask_key=reply_mask_key, fin=fin)
+
     while True:
         try:
             fin, opcode, payload = _read_ws_frame(src)
         except Exception:
             return False
         if opcode == 0x8:  # close：透传后结束
-            try:
-                _write_ws_frame(dst, 0x8, payload, mask_key=mask_key)
-            except Exception:
-                pass
+            _write_dst(0x8, payload)
             return False
-        try:
-            if opcode == 0x9:  # ping
-                _write_ws_frame(dst, 0x9, payload, mask_key=mask_key)
-            elif opcode == 0xA:  # pong
-                _write_ws_frame(dst, 0xA, payload, mask_key=mask_key)
-            else:  # text / binary / continuation
-                _write_ws_frame(dst, opcode, payload, mask_key=mask_key,
-                                fin=bool(fin))
-        except Exception:
-            return False
+        if opcode == 0x9:  # ping -> 直接回复 pong，不转发
+            _write_reply(0xA, payload)
+            continue
+        if opcode == 0xA:  # pong -> 忽略，不转发
+            continue
+        # text / binary / continuation
+        _write_dst(opcode, payload, fin=bool(fin))
 
 
 def handle_cdp_proxy(browser_sock, target_id, serial=None):
@@ -661,6 +677,13 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
         return
     upstream_sock = upstream.sock
 
+    # 取消 socket 读取超时，避免长连接因 idle 被误杀；由下方心跳保活。
+    browser_sock.settimeout(None)
+    upstream_sock.settimeout(None)
+
+    browser_lock = threading.Lock()
+    upstream_lock = threading.Lock()
+
     def close_both():
         for s in (browser_sock, upstream_sock):
             try:
@@ -669,21 +692,49 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
                 pass
 
     def to_upstream():
-        # 浏览器帧已 mask → 转发给 9222 需重新 mask
-        if not _ws_pump(browser_sock, upstream_sock, os.urandom(4), True):
+        # 浏览器 → 9222：浏览器帧已 mask，转发给上游需重新 mask；
+        # 给浏览器回 pong 时走服务端→客户端方向，不 mask。
+        if not _ws_pump(browser_sock, upstream_sock,
+                        dst_mask_key=os.urandom(4), reply_mask_key=None,
+                        dst_lock=upstream_lock, reply_lock=browser_lock):
             close_both()
 
     def to_browser():
-        # 9222 帧未 mask → 直接透传给浏览器
-        if not _ws_pump(upstream_sock, browser_sock, None, True):
+        # 9222 → 浏览器：上游帧未 mask，直接透传给浏览器；
+        # 给上游回 pong 时走客户端→服务端方向，需要 mask。
+        if not _ws_pump(upstream_sock, browser_sock,
+                        dst_mask_key=None, reply_mask_key=os.urandom(4),
+                        dst_lock=browser_lock, reply_lock=upstream_lock):
             close_both()
 
+    def heartbeat():
+        """定时向两端发 ping，避免长时间无数据被系统/ADB idle 断开。"""
+        interval = 20.0
+        while True:
+            time.sleep(interval)
+            try:
+                with browser_lock:
+                    _write_ws_frame(browser_sock, 0x9, b"h5-tool", mask_key=None)
+            except Exception:
+                close_both()
+                return
+            try:
+                with upstream_lock:
+                    _write_ws_frame(upstream_sock, 0x9, b"h5-tool", mask_key=os.urandom(4))
+            except Exception:
+                close_both()
+                return
+
+    sys.stderr.write(f"[h5-tool] CDP 代理已启动 {serial}/{target_id}\n")
     t1 = threading.Thread(target=to_upstream, daemon=True)
     t2 = threading.Thread(target=to_browser, daemon=True)
+    t3 = threading.Thread(target=heartbeat, daemon=True)
     t1.start()
     t2.start()
+    t3.start()
     t1.join()
     t2.join()
+    sys.stderr.write(f"[h5-tool] CDP 代理已结束 {serial}/{target_id}\n")
 
 
 def _claude_tcp_latency(host, port=443, timeout=5.0):
