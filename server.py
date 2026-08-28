@@ -156,8 +156,13 @@ def clip_install(serial):
 
 
 def shell_needed(path):
-    """macOS/Linux 路径一般无空格风险，但 Downloads 场景仍稳妥加引号。"""
-    return _shell_quote(path) if (" " in path or "'" in path or ")" in path) else path
+    """路径含 shell 特殊字符时加单引号（本机 shell 层转义，防空格拆词/命令注入）。
+
+    覆盖空格、括号、引号、$、&、;、|、*、反引号等常见特殊字符；无特殊字符时原样返回。
+    """
+    if any(ch in path for ch in " \t'\"()$`;&|*?[]{}<>!~\\"):
+        return _shell_quote(path)
+    return path
 
 
 def clipboard_get(serial):
@@ -1177,7 +1182,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     remote_dir = "/sdcard/Download/h5-tool"
                     run_adb(f"shell mkdir -p {remote_dir}", serial=device)
-                    r = run_adb(f"push {tmp} {remote_dir}/{filename}",
+                    r = run_adb(f"push {tmp} {shell_needed(remote_dir + '/' + filename)}",
                                 timeout=120, serial=device)
                     if r.returncode != 0:
                         raise RuntimeError(r.stderr or "adb push 失败")
@@ -1208,7 +1213,7 @@ class Handler(BaseHTTPRequestHandler):
                 with open(tmp, "wb") as f:
                     f.write(data)
                 try:
-                    r = run_adb(f"install -r {tmp}", timeout=300, serial=device)
+                    r = run_adb(f"install -r {shell_needed(tmp)}", timeout=300, serial=device)
                     out = (r.stdout + r.stderr).strip()
                     if r.returncode != 0:
                         detail = out.replace("\n", " ") or "安装失败"
