@@ -354,7 +354,7 @@ setInterval(load, 5000); // 目标列表每 5s 刷新（WebView 页面切换场�
       let msg = "✓ 已发送到手机：" + data.url;
       if (data.replaced_ip) msg += "（已把 {ip} 替换为 " + data.ip + "）";
       setMsg(msg, true);
-      pushHistory(data.url);
+      pushHistory(url); // 历史存原始输入（含 {ip} 占位符），IP 会变，存实际 IP 没意义
     } catch (e) {
       setMsg("✗ " + e.message, false);
     } finally {

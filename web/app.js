@@ -247,7 +247,7 @@ async function sendUrl(input, btn) {
     let msg = "✓ 已发送到手机：" + r.url;
     if (r.replaced_ip) msg += `（已把 {ip} 替换为 ${r.ip}）`;
     setMsg($("navMsg"), msg, true);
-    pushHistory(r.url);
+    pushHistory(url); // 历史存原始输入（含 {ip} 占位符），IP 会变，存实际 IP 没意义
   } catch (e) {
     setMsg($("navMsg"), "✗ " + e.message, false);
   } finally {
