@@ -72,6 +72,8 @@ async function cmdStop() {
 
 function cmdStart(extraArgs) {
   const args = extraArgs.filter((a) => a !== "start");
+  // 默认启动后自动在浏览器打开调试面板（服务器部署版）；可传 --no-open-browser 关闭
+  if (!args.includes("--no-open-browser")) args.push("--open-browser");
   const portIdx = args.indexOf("--port");
   const port = portIdx >= 0 ? Number(args[portIdx + 1]) : DEFAULT_PORT;
   const serverPath = path.join(PKG_DIR, "server.py");

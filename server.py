@@ -52,6 +52,54 @@ atexit.register(stop_all)
 
 WEB_DIR = Path(__file__).parent / "web"
 
+# ---------- HTTP 访问日志（落盘，不刷控制台，保留当日 = 1d） ----------
+# 目录默认 ~/.h5-tool/logs，可用 H5TOOL_LOG_DIR 覆盖；按天滚动，
+# 跨天自动切新文件并清理非当日 http-*.log。
+DEFAULT_LOG_DIR = os.path.join(os.path.expanduser("~"), ".h5-tool", "logs")
+LOG_DIR = os.environ.get("H5TOOL_LOG_DIR") or DEFAULT_LOG_DIR
+
+
+class AccessLogger:
+    def __init__(self, directory=LOG_DIR):
+        self.directory = directory
+        self._lock = threading.Lock()
+        self._fh = None
+        self._day = None
+
+    def _rotate(self):
+        """跨天/首次写入时切换文件，并清理非当天的旧日志（保留 1 天）。"""
+        day = time.strftime("%Y-%m-%d")
+        if self._fh and day == self._day:
+            return
+        if self._fh:
+            try:
+                self._fh.close()
+            except Exception:
+                pass
+            self._fh = None
+        os.makedirs(self.directory, exist_ok=True)
+        for f in Path(self.directory).glob("http-*.log"):
+            if day not in f.name:
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+        self._fh = open(Path(self.directory) / f"http-{day}.log", "a", encoding="utf-8")
+        self._day = day
+
+    def log(self, line):
+        try:
+            with self._lock:
+                self._rotate()
+                ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                self._fh.write(f"{ts} {line}\n")
+                self._fh.flush()
+        except Exception:
+            pass  # 日志失败不影响服务
+
+
+access_log = AccessLogger()
+
 # devtools-frontend 静态资源（复用 Chrome DevTools UI）
 # DEVTOOLS_DIR 支持两种形态：
 #   - 本地目录：如 /path/to/front_end 或 devtools-local/front_end（默认）
@@ -673,7 +721,7 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
             _write_ws_frame(browser_sock, 0x8, b"", fin=True)
         except Exception:
             pass
-        sys.stderr.write(f"[h5-tool] CDP 代理上游连接失败 {serial}/{target_id}: {e}\n")
+        access_log.log(f"[cdp] CDP 代理上游连接失败 {serial}/{target_id}: {e}")
         return
     upstream_sock = upstream.sock
 
@@ -725,7 +773,7 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
                 close_both()
                 return
 
-    sys.stderr.write(f"[h5-tool] CDP 代理已启动 {serial}/{target_id}\n")
+    access_log.log(f"[cdp] CDP 代理已启动 {serial}/{target_id}")
     t1 = threading.Thread(target=to_upstream, daemon=True)
     t2 = threading.Thread(target=to_browser, daemon=True)
     t3 = threading.Thread(target=heartbeat, daemon=True)
@@ -734,7 +782,7 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
     t3.start()
     t1.join()
     t2.join()
-    sys.stderr.write(f"[h5-tool] CDP 代理已结束 {serial}/{target_id}\n")
+    access_log.log(f"[cdp] CDP 代理已结束 {serial}/{target_id}")
 
 
 def _claude_tcp_latency(host, port=443, timeout=5.0):
@@ -830,10 +878,16 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def log_message(self, fmt, *args):
-        # 精简日志：截图轮询太频繁，不打印
+        # http 访问日志写入当日日志文件（保留 1d），不刷控制台；
+        # 截图轮询太频繁，不入日志。
         if "screenshot" in self.path:
             return
-        sys.stderr.write("[h5-tool] %s\n" % (fmt % args))
+        try:
+            line = "%s - - [%s] %s" % (
+                self.address_string(), self.log_date_time_string(), fmt % args)
+        except Exception:
+            line = fmt % args
+        access_log.log(line)
 
     # PNA（Private Network Access）相关头：公网页面访问 127.0.0.1 等私网地址需要后端 opt-in。
     # 注意：开了 ACA-PN 后不能再用 Allow-Origin: *，必须 echo 请求的 Origin；没有 Origin 时 fallback 回 *。
@@ -1306,12 +1360,32 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(e)}, 500)
 
 
+# 服务器部署版调试面板（devtools 静态资源托管在 CloudBase，后端/API 仍回本机 12787）
+SERVER_PANEL_URL = "https://devtools-xhstudy-d1g9ap809fb38788a.webapps.tcloudbase.com/devtools.html"
+
+
+def open_browser(url):
+    """在默认浏览器打开 url（无 GUI 的服务器环境会失败，仅提示，不影响服务）。"""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", url])
+        elif sys.platform == "win32":
+            subprocess.Popen(["cmd", "/c", "start", "", url])
+        else:
+            subprocess.Popen(["xdg-open", url])
+        print(f"[h5-tool] 已在默认浏览器打开调试面板：{url}", flush=True)
+    except Exception as e:
+        print(f"[h5-tool] 未能自动打开浏览器，可手动访问：{url}\n  {e}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="H5 小工具后端服务")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=12787)
     parser.add_argument("--no-clip-sync", action="store_true",
                         help="禁用剪贴板自动同步")
+    parser.add_argument("--open-browser", action="store_true",
+                        help="启动后在默认浏览器打开调试面板（服务器部署版）")
     args = parser.parse_args()
 
     global SERVER_PORT, _clip_sync
@@ -1328,7 +1402,10 @@ def main():
     print(f"[h5-tool] 服务已启动：{url}", flush=True)
     print("[h5-tool] 在浏览器打开上面的地址即可使用控制台。按 Ctrl+C 退出。", flush=True)
     print("[h5-tool] 控制台（服务器部署版）：https://devtools-xhstudy-d1g9ap809fb38788a.webapps.tcloudbase.com/", flush=True)
-    print("[h5-tool] 调试面板（服务器部署版）：https://devtools-xhstudy-d1g9ap809fb38788a.webapps.tcloudbase.com/devtools.html", flush=True)
+    print(f"[h5-tool] 调试面板（服务器部署版）：{SERVER_PANEL_URL}", flush=True)
+    print(f"[h5-tool] HTTP 日志目录：{LOG_DIR}（按天滚动，仅保留当日）", flush=True)
+    if args.open_browser:
+        open_browser(SERVER_PANEL_URL)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
