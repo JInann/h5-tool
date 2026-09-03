@@ -594,7 +594,7 @@ def get_devices():
             if devs:
                 for d in devs:
                     label = ("模拟器" if d["scope"] == "sim"
-                             else "iPhone" if d["scope"] == "dev"
+                             else "iPhone" if d["scope"] == "device"
                              else d["scope"])
                     entries.append({
                         "serial": "ios:" + d["key"],   # ios:sim:32451

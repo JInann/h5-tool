@@ -89,14 +89,14 @@ def _extract_app(description):
 
 
 def _extract_device(item):
-    """从 target 提取设备标识，如 'sim:14407'（多台模拟器/真机以此分组）。
+    """从 target 提取设备标识，如 'sim:32451' / 'device:00008030-...'（多设备分组）。
 
-    id 形如 'sim:14407:PID:14526:33'（真机前缀预计 dev:），description
-    形如 'sim:14407 (com.apple.mobilesafari)' —— 取 <scope>:<n> 前缀段即可，
-    scope 不同（sim/dev）天然不冲突。
+    id 形如 'sim:14407:PID:14526:33'（模拟器）或
+    'device:00008030-000E444C2198402E:PID:488:1'（真机 USB 序列号），
+    description 前缀同源 —— 取 <scope>:<n> 前缀段即可，scope 不同天然不冲突。
     """
     for field in ("id", "description"):
-        m = re.match(r"(sim|dev):([A-Za-z0-9._-]+)", item.get(field) or "")
+        m = re.match(r"(sim|device):([A-Za-z0-9._-]+)", item.get(field) or "")
         if m:
             return m.group(1) + ":" + m.group(2)
     return None

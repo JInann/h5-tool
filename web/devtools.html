@@ -396,13 +396,15 @@ function renderIosList(ios) {
   }).join("");
 }
 
-// iOS 设备标识 → 可读标签（sim=模拟器 / dev=真机）
+// iOS 设备标识 → 可读标签（sim=模拟器 / device=真机）
 function deviceLabel(dev) {
   if (!dev) return "未知设备";
   const idx = dev.indexOf(":");
   const scope = idx > 0 ? dev.slice(0, idx) : dev;
-  const id = idx > 0 ? dev.slice(idx + 1) : "";
-  const kind = scope === "sim" ? "模拟器" : (scope === "dev" ? "真机" : scope);
+  let id = idx > 0 ? dev.slice(idx + 1) : "";
+  // 真机 USB 序列号较长（00008030-000E444C2198402E），保留前 13 位区分即可
+  if (scope === "device" && id.length > 13) id = id.slice(0, 13);
+  const kind = scope === "sim" ? "模拟器" : (scope === "device" ? "真机" : scope);
   return (kind + " " + id).trim();
 }
 
