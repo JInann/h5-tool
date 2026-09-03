@@ -686,16 +686,21 @@ def _ws_pump(src, dst, dst_mask_key, reply_mask_key, dst_lock=None, reply_lock=N
             fin, opcode, payload = _read_ws_frame(src)
         except Exception:
             return False
-        if opcode == 0x8:  # close：透传后结束
-            _write_dst(0x8, payload)
+        # write 也可能因对端已被另一线程 close_both 关闭而抛 EBADF/EPIPE，
+        # 必须同样视为"应结束"，否则异常会冒泡出线程（连 close_both 都走不到）。
+        try:
+            if opcode == 0x8:  # close：透传后结束
+                _write_dst(0x8, payload)
+                return False
+            if opcode == 0x9:  # ping -> 直接回复 pong，不转发
+                _write_reply(0xA, payload)
+                continue
+            if opcode == 0xA:  # pong -> 忽略，不转发
+                continue
+            # text / binary / continuation
+            _write_dst(opcode, payload, fin=bool(fin))
+        except Exception:
             return False
-        if opcode == 0x9:  # ping -> 直接回复 pong，不转发
-            _write_reply(0xA, payload)
-            continue
-        if opcode == 0xA:  # pong -> 忽略，不转发
-            continue
-        # text / binary / continuation
-        _write_dst(opcode, payload, fin=bool(fin))
 
 
 def handle_cdp_proxy(browser_sock, target_id, serial=None):
