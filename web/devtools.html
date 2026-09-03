@@ -237,8 +237,9 @@ async function loadDevices() {
     if (adbBanner) adbBanner.hidden = adbOk;
     const all = data.devices || [];
     const android = all.filter((d) => d.platform !== "ios");
-    const ios = all.find((d) => d.platform === "ios");
-    if (!adbOk && !ios) {
+    const iosTabs = all.filter((d) => d.platform === "ios");
+    const idleIos = iosTabs.find((d) => d.serial === "ios");   // 占位入口（无具体设备）
+    if (!adbOk && !iosTabs.length) {
       box.innerHTML = '<span class="tab-empty" style="color:var(--err);font-weight:600;">⚠ adb 未安装</span>';
       return;
     }
@@ -249,21 +250,42 @@ async function loadDevices() {
     let keep = device;
     const ids = all.map((d) => d.serial);
     if (!ids.includes(keep)) {
-      // 偏好选择：无 Android（或 adb 不可用）但 iOS 可用时默认 iOS
-      const preferIos = ios && (!android.length || !adbOk);
-      keep = preferIos ? "ios" : (data.default && ids.includes(data.default) ? data.default : ids[0]);
+      // 回退选择：原 iOS 系（占位→真设备出现/切走）优先接回 iOS；
+      // 无 Android（或 adb 不可用）时也默认 iOS
+      const wasIos = String(keep || "").startsWith("ios");
+      let next;
+      if (wasIos && iosTabs.length) next = iosTabs[0].serial;
+      else if (iosTabs.length && (!android.length || !adbOk)) next = iosTabs[0].serial;
+      else if (data.default && ids.includes(data.default)) next = data.default;
+      else next = ids[0];
+      keep = next;
     }
     box.innerHTML = all.map((d) => {
       const active = d.serial === keep ? " active" : "";
       if (d.platform === "ios") {
-        const warn = d.supported && !d.bun ? " ⚠" : "";
-        const sub = d.supported ? (d.bun ? "Safari/App" : "缺 bun") : "仅 macOS";
-        return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS Safari / App 内 WKWebView（macOS + bun）">iOS${warn}<span class="sub">${sub}</span></button>`;
+        if (d.serial === "ios") {
+          // 占位入口：桥未就绪 / 暂无设备时，点击即懒启动并展示引导
+          const warn = d.error || (d.supported && !d.bun) ? " ⚠" : "";
+          let sub = "Safari/App";
+          if (!d.supported) sub = "仅 macOS";
+          else if (!d.bun) sub = "缺 bun";
+          else if (d.starting) sub = "启动中";
+          else if (d.running) sub = "无设备";
+          return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS Safari / App 内 WKWebView（macOS + bun）">iOS${warn}<span class="sub">${sub}</span></button>`;
+        }
+        // 具体 iOS 设备（模拟器 / 真机），与 Android 心智一致：一台一个 tab
+        const devKey = d.device_key || String(d.serial).slice(4);
+        const label = truncate(deviceLabel(devKey), 22);
+        return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS ${escapeHtml(devKey)} · Safari / App 内 WKWebView">${escapeHtml(label)}<span class="sub">iOS</span></button>`;
       }
       const model = (d.model || "").replace(/_/g, " ") || "Android";
       return `<button class="device-tab${active}" data-serial="${d.serial}" title="序列号：${d.serial}">${model}<span class="sub">${d.serial}</span></button>`;
     }).join("");
-    if (keep !== device) { device = keep; try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {} }
+    if (keep !== device) {
+      device = keep;
+      try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {}
+      load(true);   // 轮询中发现设备变化（如 iOS 占位→真设备出现）时同步刷新列表
+    }
   } catch (e) {
     box.innerHTML = '<span class="tab-empty">后端未连接</span>';
     const adbBanner = $("adbBanner");
@@ -283,7 +305,7 @@ async function load(showLoading) {
   } catch (e) {
     data.phone_error = "请求后端失败：" + e.message;
   }
-  const isIos = device === "ios";
+  const isIos = String(device || "").startsWith("ios");
   setSection(isIos ? "ios" : "android");
   if (isIos) renderIosList(data.ios);
   else renderList("phoneList", "dotPhone", data.phone, data.phone_error);
@@ -338,8 +360,19 @@ function renderIosList(ios) {
   const list = (ios.targets || []).filter((t) => t.ws);
   dot.className = "dot" + (list.length ? " on" : "");
   if (!list.length) return show("empty",
-    "无可调试目标：在 Safari 打开页面，或在 App 内打开 H5 页面（App 需允许 Web Inspector，一般 Debug 包开启）。");
-  // 多设备/多 App 分组：device（sim:xxx / dev:xxx）→ 组头 + 页面卡
+    "无可调试目标：<br>· 模拟器 / 手机 Safari：先打开页面；<br>· iPhone 真机：先在 Finder（访达）侧栏点该设备 → 手机弹窗点「信任此电脑」并解锁，"
+    + "再到手机 设置→Safari→高级→打开「Web 检查器」；<br>· App 内 H5：App 需允许 Web Inspector（一般 Debug 包开启）。");
+  const uniqDevs = list.map((t) => t.device || "?").filter((v, i, a) => a.indexOf(v) === i);
+  if (uniqDevs.length <= 1) {
+    // 单设备（device=ios:xxx 已按设备过滤）：直接平铺目标卡，与 Android 心智一致
+    el.innerHTML = list.map((t) => {
+      targets[t.id] = t;
+      const badge = (t.app || "").split(".").pop() || t.type || "page";
+      return targetCard(t, badge);
+    }).join("");
+    return;
+  }
+  // 多设备兜底（占位入口全量模式）：device（sim:xxx / dev:xxx）→ 组头 + 页面卡
   const groups = {};
   list.forEach((t) => {
     const k = t.device || "unknown";
@@ -453,7 +486,8 @@ $("deviceTabs").addEventListener("click", (e) => {
 
 loadDevices();
 load();
-setInterval(load, 5000); // 目标列表每 5s 刷新（WebView 页面切换场景）
+setInterval(load, 5000);          // 目标列表每 5s 刷新（WebView 页面切换场景）
+setInterval(() => { try { loadDevices(); } catch (e) {} }, 8000);  // 设备 tab 周期刷新（iOS 桥懒启动后出现真设备）
 
 // ---------- header 自动收起：默认隐藏，鼠标移动到视口顶部即展开 ----------
 (() => {

@@ -576,39 +576,70 @@ def _pick_targets(pages):
 
 
 def get_devices():
-    """设备列表：Android 真机（现状）+ iOS 虚拟设备（inspect-webkit 桥入口）。
+    """设备列表：Android 真机（现状）+ iOS 设备（inspect-webkit，每台一个 tab）。
 
-    iOS 条目恒定列出（不要求 darwin/bun 就绪），桥状态在 /api/webview-targets
-    懒启动时给出；Android 条目保持原字段 —— devtools.html 消费本接口，
-    主控台 index.html 走 /api/status，两者互不影响。
+    iOS 部分三种形态（与 Android 设备 tab 并列，语义一致）：
+      - 桥已就绪且有设备 → 每台一个条目，serial 形如 "ios:sim:32451"
+        （前端 tab 可直接切换单设备调试，与 Android 心智一致）
+      - darwin + bun、桥未就绪/无设备 → 单个占位条目（serial="ios"，
+        点击即懒启动桥并给出配对/引导文案）
+      - 非 darwin → 不加条目（该功能不可用，不展示）
+    Android 条目保持原字段；devtools.html 消费本接口，主控台走 /api/status。
     """
     ios = ios_bridge.status()
+    entries = list_devices()
+    if ios.get("supported"):
+        if ios.get("running") and ios.get("bun"):
+            devs = ios_bridge.devices()
+            if devs:
+                for d in devs:
+                    label = ("模拟器" if d["scope"] == "sim"
+                             else "iPhone" if d["scope"] == "dev"
+                             else d["scope"])
+                    entries.append({
+                        "serial": "ios:" + d["key"],   # ios:sim:32451
+                        "platform": "ios", "state": "device",
+                        "model": label + " (iOS)", "product": None,
+                        "device_key": d["key"],
+                        "supported": True, "bun": True,
+                    })
+            else:
+                entries.append(_ios_idle_entry(ios))   # 桥在跑但暂无设备
+        else:
+            entries.append(_ios_idle_entry(ios))       # 未启动/缺 bun，占位引导
+    return {"devices": entries, "default": default_serial(), "adb": adb_available()}
+
+
+def _ios_idle_entry(ios):
+    """iOS 占位设备条目：桥未就绪或暂无设备时给出入口与状态提示。"""
     return {
-        "devices": list_devices() + [{
-            "serial": "ios", "platform": "ios", "state": "device",
-            "model": "iOS (inspect-webkit)", "product": None,
-            "supported": ios.get("supported"), "bun": ios.get("bun"),
-        }],
-        "default": default_serial(),
-        "adb": adb_available(),
+        "serial": "ios", "platform": "ios", "state": "idle",
+        "model": "iOS (inspect-webkit)", "product": None,
+        "supported": ios.get("supported"), "bun": ios.get("bun"),
+        "running": ios.get("running"), "starting": ios.get("starting"),
+        "error": ios.get("error"),
     }
 
 
-def get_ios_webview_targets():
+def get_ios_webview_targets(devkey=None):
     """iOS 桥目标汇总：懒启动（幂等、后台线程、立即返回）+ 状态 + targets。
 
-    返回 ios 分区结构；调用方无需关心桥进程细节，轮询本接口即可等到就绪。
+    devkey 形如 "sim:32451"（对应 device=ios:sim:32451 的单设备 tab）；
+    为空（占位 tab / 全量）时返回所有目标。轮询本接口即可等到就绪。
     """
     ios_bridge.ensure_started()
     st = ios_bridge.status()
     targets, terr = None, st.get("error")
     if st.get("running"):
         try:
-            targets = ios_bridge.targets()
+            ts = ios_bridge.targets() or []
+            if devkey:
+                ts = [t for t in ts if t.get("device") == devkey]
+            targets = ts
         except Exception as e:
             terr = str(e)
     return {
-        "device": "ios", "platform": "ios",
+        "device": "ios" + (":" + devkey if devkey else ""), "platform": "ios",
         "phone": [], "phone_error": None,
         "ios": {
             "running": st.get("running"),
@@ -623,12 +654,14 @@ def get_ios_webview_targets():
 
 
 def get_webview_targets(serial=None):
-    """汇总可调试目标：device=ios → iOS 桥分区；其余 → Android WebView（现状）。
+    """汇总可调试目标：device=ios[:<devkey>] → iOS 桥分区；其余 → Android WebView。
 
     Android 分支复用 cdp.setup()（幂等，自动建 adb forward 并刷新目标）。
     """
-    if serial == "ios":
-        return get_ios_webview_targets()
+    if serial and serial.startswith("ios"):
+        # serial: "ios"（占位/全量）或 "ios:sim:32451"（单设备）
+        key = serial.split(":", 1)[1] if serial.startswith("ios:") else None
+        return get_ios_webview_targets(key)
     result = {"device": serial, "platform": "android",
               "phone": [], "phone_error": None, "ios": None}
     try:
@@ -762,7 +795,7 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
     （握手不带 Origin：Android WebView 的 9222、iOS 桥的 9322 才能 101）。
     serial == "ios" 时上游为 inspect-webkit 桥（不做任何 adb 操作，无 Android 设备也可用）。
     """
-    if serial == "ios":
+    if serial and serial.startswith("ios"):   # ios（占位）或 ios:sim:32451（单设备）
         if not ios_bridge.is_running():
             try:
                 _write_ws_frame(browser_sock, 0x8, b"", fin=True)

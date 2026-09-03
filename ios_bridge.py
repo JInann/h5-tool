@@ -285,6 +285,27 @@ class IOSBridge:
             })
         return out
 
+    def devices(self):
+        """桥就绪时返回已发现的 iOS 设备列表 [{key, scope, id}]（供 header 设备 tab）。
+
+        从 targets 的 device 前缀推导；未就绪返回 None（不触发启动）。
+        """
+        if not self.is_running():
+            return None
+        try:
+            pages = _no_proxy_get_json(
+                "http://127.0.0.1:%d/json/list" % self.port, timeout=4.0)
+        except Exception:
+            return None
+        seen, out = set(), []
+        for p in pages or []:
+            key = _extract_device(p)
+            if key and key not in seen:
+                seen.add(key)
+                scope, _, d = key.partition(":")
+                out.append({"key": key, "scope": scope, "id": d})
+        return out
+
 
 # 模块级单例 + server.py 可直接使用的函数
 bridge = IOSBridge()
@@ -306,6 +327,11 @@ def is_running():
 def targets():
     """拉取桥目标列表（桥未就绪返回 None）。"""
     return bridge.targets()
+
+
+def devices():
+    """拉取桥已发现的 iOS 设备列表（桥未就绪返回 None）。"""
+    return bridge.devices()
 
 
 def stop_all():
