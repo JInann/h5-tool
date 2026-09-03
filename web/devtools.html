@@ -103,6 +103,16 @@
   .empty { font-size: 12px; color: var(--muted); }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 4px; }
   code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  /* iOS 多设备分组头 */
+  .dev-group {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+    margin: 14px 0 8px; padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .dev-group:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+  .dev-group .dg-id { color: var(--text); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .dev-group .dg-app { color: var(--accent2); font-weight: 400; }
+  .dev-group .dg-cnt { margin-left: auto; font-weight: 400; font-size: 11px; }
   /* 快捷修改地址（吸底常驻） */
   .quick-nav {
     position: sticky; bottom: 0; z-index: 5;
@@ -329,11 +339,38 @@ function renderIosList(ios) {
   dot.className = "dot" + (list.length ? " on" : "");
   if (!list.length) return show("empty",
     "无可调试目标：在 Safari 打开页面，或在 App 内打开 H5 页面（App 需允许 Web Inspector，一般 Debug 包开启）。");
-  el.innerHTML = list.map((t) => {
-    targets[t.id] = t;
-    const app = (t.app || "").split(".").pop() || "safari";
-    return targetCard(t, app);
+  // 多设备/多 App 分组：device（sim:xxx / dev:xxx）→ 组头 + 页面卡
+  const groups = {};
+  list.forEach((t) => {
+    const k = t.device || "unknown";
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(t);
+  });
+  el.innerHTML = Object.keys(groups).sort().map((dev) => {
+    const items = groups[dev];
+    const apps = Array.from(new Set(items.map((t) => t.app).filter(Boolean)))
+      .map((a) => escapeHtml(a.split(".").pop() || a)).join(" / ");
+    return (
+      '<div class="dev-group"><span class="dg-id">' + escapeHtml(deviceLabel(dev)) +
+        '</span><span class="dg-app">' + apps +
+        '</span><span class="dg-cnt">' + items.length + ' 页</span></div>' +
+      items.map((t) => {
+        targets[t.id] = t;
+        const badge = (t.app || "").split(".").pop() || t.type || "page";
+        return targetCard(t, badge);
+      }).join("")
+    );
   }).join("");
+}
+
+// iOS 设备标识 → 可读标签（sim=模拟器 / dev=真机）
+function deviceLabel(dev) {
+  if (!dev) return "未知设备";
+  const idx = dev.indexOf(":");
+  const scope = idx > 0 ? dev.slice(0, idx) : dev;
+  const id = idx > 0 ? dev.slice(idx + 1) : "";
+  const kind = scope === "sim" ? "模拟器" : (scope === "dev" ? "真机" : scope);
+  return (kind + " " + id).trim();
 }
 
 // 区块标题/提示随平台切换

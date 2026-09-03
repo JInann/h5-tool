@@ -88,6 +88,20 @@ def _extract_app(description):
     return m.group(1) if m else None
 
 
+def _extract_device(item):
+    """从 target 提取设备标识，如 'sim:14407'（多台模拟器/真机以此分组）。
+
+    id 形如 'sim:14407:PID:14526:33'（真机前缀预计 dev:），description
+    形如 'sim:14407 (com.apple.mobilesafari)' —— 取 <scope>:<n> 前缀段即可，
+    scope 不同（sim/dev）天然不冲突。
+    """
+    for field in ("id", "description"):
+        m = re.match(r"(sim|dev):([A-Za-z0-9._-]+)", item.get(field) or "")
+        if m:
+            return m.group(1) + ":" + m.group(2)
+    return None
+
+
 class IOSBridge:
     """inspect-webkit 桥进程生命周期管理（模块级单例）。"""
 
@@ -261,6 +275,7 @@ class IOSBridge:
         for p in pages or []:
             out.append({
                 "id": p.get("id"),
+                "device": _extract_device(p),      # 如 sim:14407（多设备分组用）
                 "title": p.get("title", ""),
                 "url": p.get("url", ""),
                 "type": p.get("type", "page"),
