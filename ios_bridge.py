@@ -73,7 +73,8 @@ def find_pmd3():
         return [uvx, "pymobiledevice3"], None
     return None, ("未找到 pymobiledevice3 引擎。安装："
                   "brew install pymobiledevice3 或 pipx install pymobiledevice3"
-                  "（或用 H5TOOL_PMD3 指定可执行文件路径）")
+                  "（Windows 另需 iTunes / Apple Devices 提供 usbmuxd 驱动；"
+                  "或用 H5TOOL_PMD3 指定可执行文件路径）")
 
 
 def _no_proxy_get_json(url, timeout=HEALTH_TIMEOUT):
@@ -314,7 +315,8 @@ class IOSBridge:
                 if not base:
                     inst.error = ("未找到 pymobiledevice3 引擎。安装："
                                   "brew install pymobiledevice3 或 "
-                                  "pipx install pymobiledevice3")
+                                  "pipx install pymobiledevice3"
+                                  "（Windows 另需 iTunes / Apple Devices）")
                     continue
                 inst.starting = True
                 inst.error = None

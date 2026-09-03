@@ -353,7 +353,8 @@ function renderIosList(ios) {
   if (!ios) return show("err", "后端未返回 iOS 桥状态");
   if (!ios.supported) return show("err", "当前环境不支持 iOS 真机调试（pymobiledevice3 不可用）。");
   if (!ios.tool) return show("err",
-    "未检测到 pymobiledevice3 引擎：<code>brew install pymobiledevice3</code>（或 <code>pipx install pymobiledevice3</code>），装好后刷新页面。");
+    "未检测到 pymobiledevice3 引擎：<code>brew install pymobiledevice3</code>（或 <code>pipx install pymobiledevice3</code>）。"
+    + "<br>Windows 另需安装 iTunes / Apple Devices（提供 usbmuxd 驱动）。装好后刷新页面。");
   if (ios.error) return show("err", "iOS 调试桥异常：" + escapeHtml(ios.error));
   if (ios.starting && !ios.running) return show("empty",
     "iOS 调试桥启动中…（pymobiledevice3 连接真机，约 5~20 秒，此页每 5 秒自动刷新）");

@@ -41,7 +41,7 @@
 | Python | >= 3.8 | **必需** | 运行服务（纯标准库，无需 pip 装包） |
 | adb | 任意 | **必需** | 手机控制/CDP/截图/镜像 |
 | Node.js | >= 18 | 可选 | 仅重建 devtools-frontend 产物时需要 |
-| pymobiledevice3 | >= 7.0（推荐最新） | **调试 iOS 真机时需要** | 跑 `webinspector cdp` 子命令做 WIR → CDP 翻译；`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`（也可 `H5TOOL_PMD3` env 指定路径或 `uvx pymobiledevice3` 兜底）。注意：**仅支持真机，不支持 iOS 模拟器** |
+| pymobiledevice3 | >= 7.0（推荐最新） | **调试 iOS 真机时需要** | 跑 `webinspector cdp` 子命令做 WIR → CDP 翻译；`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`（Windows 另需安装 iTunes / Apple Devices 提供 usbmuxd 驱动；也可 `H5TOOL_PMD3` env 指定路径或 `uvx pymobiledevice3` 兜底）。注意：**仅支持真机，不支持 iOS 模拟器** |
 | devtools 产物 | — | 可选 | WebView 调试面板；缺失不影响其余功能 |
 
 ---
@@ -77,7 +77,7 @@ python3 --version        # >= 3.8；Windows 可能是 py -3 / python
 adb devices              # 应能看到设备（手机需开 USB 调试并授权）
 # 4) pymobiledevice3（iOS 真机调试需要）：
 #    macOS: brew install pymobiledevice3
-#    其它平台: pipx install pymobiledevice3（Windows 还需要装 Apple Devices/iTunes 提供 usbmuxd）
+#    其它平台: pipx install pymobiledevice3（Windows 还需安装 iTunes / Apple Devices 提供 usbmuxd）
 # 4) devtools 产物（可选）：
 #    - 本地：把 front_end 目录放到 devtools-local/front_end/
 #    - 远程：export DEVTOOLS_DIR=http://服务器:端口/devtools （见第 5 节）

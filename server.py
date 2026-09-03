@@ -1518,6 +1518,7 @@ def check_ios_startup():
         "⚠ 未检测到 pymobiledevice3（iOS Safari / App WebView 调试需要）！",
         "   安装：brew install pymobiledevice3",
         "   或：pipx install pymobiledevice3；也可用 H5TOOL_PMD3 环境变量指定路径。",
+        "   Windows 另需安装 iTunes / Apple Devices（提供 usbmuxd 驱动）。",
         "   装好后重启 h5-tool 即可（不影响 Android 调试）。",
     ])
 
