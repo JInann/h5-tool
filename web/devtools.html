@@ -231,15 +231,15 @@ async function loadDevices() {
   try {
     const r = await fetch(apiUrl("/api/devices"), fetchOpts());
     const data = await r.json();
-    // adb 未安装：横幅提示，但 iOS 入口不受影响（iOS 桥不依赖 adb）
+    // adb 未安装：横幅提示，但 iOS 真机不受影响（iOS 调试不依赖 adb）
     const adbOk = !data.adb || data.adb.installed;
     const adbBanner = $("adbBanner");
     if (adbBanner) adbBanner.hidden = adbOk;
     const all = data.devices || [];
     const android = all.filter((d) => d.platform !== "ios");
     const iosTabs = all.filter((d) => d.platform === "ios");
-    const idleIos = iosTabs.find((d) => d.serial === "ios");   // 占位入口（无具体设备）
-    if (!adbOk && !iosTabs.length) {
+    // 设备列表只列真实设备：无 iOS 真机就没有 iOS tab（无占位入口）
+    if (!adbOk && !all.length) {
       box.innerHTML = '<span class="tab-empty" style="color:var(--err);font-weight:600;">⚠ adb 未安装</span>';
       return;
     }
@@ -250,8 +250,8 @@ async function loadDevices() {
     let keep = device;
     const ids = all.map((d) => d.serial);
     if (!ids.includes(keep)) {
-      // 回退选择：原 iOS 系（占位→真设备出现/切走）优先接回 iOS；
-      // 无 Android（或 adb 不可用）时也默认 iOS
+      // 回退选择：原 iOS 系（iPhone 拔了 / 换插）优先接回 iOS 真机；
+      // 无 Android（或 adb 不可用）但有 iPhone 时也默认 iOS
       const wasIos = String(keep || "").startsWith("ios");
       let next;
       if (wasIos && iosTabs.length) next = iosTabs[0].serial;
@@ -263,17 +263,7 @@ async function loadDevices() {
     box.innerHTML = all.map((d) => {
       const active = d.serial === keep ? " active" : "";
       if (d.platform === "ios") {
-        if (d.serial === "ios") {
-          // 占位入口：桥未就绪 / 暂无设备时，点击即懒启动并展示引导
-          const warn = d.error || (d.supported && !d.tool) ? " ⚠" : "";
-          let sub = "Safari/App";
-          if (!d.supported) sub = "不可用";
-          else if (!d.tool) sub = "缺引擎";
-          else if (d.starting) sub = "启动中";
-          else if (d.running) sub = "无设备";
-          return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS Safari / App 内 WKWebView（真机 + pymobiledevice3）">iOS${warn}<span class="sub">${sub}</span></button>`;
-        }
-        // 具体 iOS 真机（每台一个 tab，与 Android 心智一致）
+        // iOS 真机：每台一个 tab（桥点击后才懒启动，见 /api/webview-targets）
         const devKey = d.device_key || String(d.serial).slice(4);
         const label = truncate(deviceLabel(devKey), 22);
         return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS ${escapeHtml(devKey)} · Safari / App 内 WKWebView">${escapeHtml(label)}<span class="sub">iOS</span></button>`;
@@ -284,7 +274,7 @@ async function loadDevices() {
     if (keep !== device) {
       device = keep;
       try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {}
-      load(true);   // 轮询中发现设备变化（如 iOS 占位→真设备出现）时同步刷新列表
+      load(true);   // 轮询中发现设备变化（iPhone 插入/拔出）时同步刷新列表
     }
   } catch (e) {
     box.innerHTML = '<span class="tab-empty">后端未连接</span>';

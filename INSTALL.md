@@ -168,7 +168,7 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 |------------|------|------|
 | 控制台右上角 WebView 红灯，`webview_error: 未找到 WebView` | App 未开启 `WebView.setWebContentsDebuggingEnabled(true)`；或当前没打开 H5 页面 | 让客户端开调试开关（仅测试包）；先打开 H5 页面再刷新 |
 | `webview_error: 未检测到已连接的设备` | adb devices 为空 | 见安装阶段 adb 条目 |
-| iOS 调试区显示「端口 9322 已被其它进程占用」 | 上一次 iOS 桥进程没正常退出（强杀 server、TaskStop 等走不到 atexit） | `lsof -ti tcp:9322 \| xargs kill -9` 后回到页面刷新即可（占位的 iOS tab 会触发懒启动重拉桥） |
+| iOS 调试区显示「端口 9322 已被其它进程占用」 | 上一次 iOS 桥进程没正常退出（强杀 server、TaskStop 等走不到 atexit） | `lsof -ti tcp:9322 \| xargs kill -9` 后刷新页面，重新点 iOS 真机 tab 即可（懒启动重拉桥） |
 | 执行 JS 报 `CDP 命令超时` | WebView 刚重建 / 页面在跳转 | 自动重连一次后仍失败就等 1-2s 重试；页面导航后 target 会变 |
 | `Runtime.evaluate` 结果不符预期 | 页面上下文限制 | 确认表达式在页面上下文（非 iframe）；可先 `location.href` 验证 |
 

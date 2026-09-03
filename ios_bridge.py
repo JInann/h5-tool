@@ -45,7 +45,7 @@ BRIDGE_LOG = os.path.join(LOG_DIR, "ios-bridge.log")
 
 START_TIMEOUT = 60.0   # 实例就绪超时（pmd3 import 较重 + 首次连接设备）
 HEALTH_TIMEOUT = 2.0   # 健康探测单次超时
-USBMUX_TTL = 5.0       # usbmux 设备表缓存（秒），避免每 8s 轮询都 spawn 一次
+USBMUX_TTL = 10.0      # usbmux 设备表缓存（秒）：8s 轮询下每 ~2 轮 spawn 一次 pmd3
 
 
 class BridgeError(Exception):

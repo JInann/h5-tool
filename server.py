@@ -576,48 +576,26 @@ def _pick_targets(pages):
 
 
 def get_devices():
-    """设备列表：Android 真机（现状）+ iOS 真机（pymobiledevice3，每台一个 tab）。
+    """设备列表：Android 真机 + iOS 真机（pymobiledevice3），每台一个 tab。
 
-    iOS 部分三种形态（与 Android 设备 tab 并列，语义一致）：
-      - usbmux 有真机 → 每台一个条目，serial 形如 "ios:<udid>"
-        （前端 tab 可直接切换单设备调试，与 Android 心智一致）
-      - 引擎可用但桥未就绪/暂无真机 → 单个占位条目（serial="ios"，
-        点击即懒启动桥并给出配对/引导文案）
-      - 引擎缺失 → 占位条目带 error（前端给出安装指引）
+    iOS 部分与 Android 心智一致：**只列真实设备**——
+      - usbmux 探测到 iPhone/iPad（且引擎 pymobiledevice3 可用）→ 每台一个
+        条目，serial 形如 "ios:<udid>"（点击该 tab 才懒启动桥，见 targets 接口）
+      - 没有 iOS 真机 / 引擎缺失 → 不产出任何 iOS 占位条目
     Android 条目保持原字段；devtools.html 消费本接口，主控台走 /api/status。
     """
     ios = ios_bridge.status()
     entries = list_devices()
-    if ios.get("supported"):
-        if ios.get("running") and ios.get("tool"):
-            devs = ios_bridge.devices()
-            if devs:
-                for d in devs:
-                    label = ("iPhone" if d["scope"] == "device"
-                             else d["scope"])
-                    entries.append({
-                        "serial": "ios:" + d["key"],   # ios:00008030-...
-                        "platform": "ios", "state": "device",
-                        "model": label + " (iOS)", "product": None,
-                        "device_key": d["key"],
-                        "supported": True, "tool": True,
-                    })
-            else:
-                entries.append(_ios_idle_entry(ios))   # 桥在跑但暂无真机
-        else:
-            entries.append(_ios_idle_entry(ios))       # 未启动/缺引擎，占位引导
+    if ios.get("tool"):   # 引擎可用才可能发现真机（usbmux list 依赖 pmd3）
+        for d in (ios_bridge.devices() or []):
+            entries.append({
+                "serial": "ios:" + d["key"],   # ios:00008030-...
+                "platform": "ios", "state": "device",
+                "model": "iPhone (iOS)", "product": None,
+                "device_key": d["key"],
+                "supported": True, "tool": True,
+            })
     return {"devices": entries, "default": default_serial(), "adb": adb_available()}
-
-
-def _ios_idle_entry(ios):
-    """iOS 占位设备条目：桥未就绪或暂无设备时给出入口与状态提示。"""
-    return {
-        "serial": "ios", "platform": "ios", "state": "idle",
-        "model": "iOS (pymobiledevice3)", "product": None,
-        "supported": ios.get("supported"), "tool": ios.get("tool"),
-        "running": ios.get("running"), "starting": ios.get("starting"),
-        "error": ios.get("error"),
-    }
 
 
 def get_ios_webview_targets(devkey=None):
