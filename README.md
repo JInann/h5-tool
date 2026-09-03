@@ -26,10 +26,11 @@
 5. **WebView 调试（完整 Chrome DevTools）** — 复用 Chromium 开源的 devtools-frontend，浏览器内
    直接使用 Console / Sources 断点 / Network / Storage / Elements 全套调试能力调试手机 WebView。
    控制台右上角「🛠 调试」进入，选择目标后 iframe 内嵌 DevTools（也可新窗口打开）。
-6. **iOS Safari / App WebView 调试（macOS）** — `inspect-webkit` 桥进程
-   （WIR → CDP 翻译，Evan Bacon 出品）由 `ios_bridge.py` 管理生命周期，模拟器免配对、真机走
-   usbmuxd + lockdownd 配对。设备 tab 选「iOS」即可看到 Safari 标签页 / App 内 WKWebView 列表，
+6. **iOS Safari / App WebView 调试（真机）** — `pymobiledevice3` 的 `webinspector cdp` 子命令
+   （doronz88 出品，纯 Python、跨平台）由 `ios_bridge.py` 管理生命周期，每台真机 spawn 一个实例，
+   端口 9322+slot。设备 tab 选「iOS」或具体真机即可看到 Safari 标签页 / App 内 WKWebView 列表，
    内嵌打开即用完整 DevTools（截图 / 点击 / 录屏受 iOS 系统限制暂不支持）。
+   **需要前置依赖 pymobiledevice3**：`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`。
 7. **MCP 接入（AI 使用）** — `mcp_server.py` 把后端 HTTP 接口封装成 MCP 工具，AI 客户端
    （WorkBuddy 等）可直接截图看画面、点击/滑动/按键、发链接、执行 JS。
 

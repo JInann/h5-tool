@@ -265,15 +265,15 @@ async function loadDevices() {
       if (d.platform === "ios") {
         if (d.serial === "ios") {
           // 占位入口：桥未就绪 / 暂无设备时，点击即懒启动并展示引导
-          const warn = d.error || (d.supported && !d.bun) ? " ⚠" : "";
+          const warn = d.error || (d.supported && !d.tool) ? " ⚠" : "";
           let sub = "Safari/App";
-          if (!d.supported) sub = "仅 macOS";
-          else if (!d.bun) sub = "缺 bun";
+          if (!d.supported) sub = "不可用";
+          else if (!d.tool) sub = "缺引擎";
           else if (d.starting) sub = "启动中";
           else if (d.running) sub = "无设备";
-          return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS Safari / App 内 WKWebView（macOS + bun）">iOS${warn}<span class="sub">${sub}</span></button>`;
+          return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS Safari / App 内 WKWebView（真机 + pymobiledevice3）">iOS${warn}<span class="sub">${sub}</span></button>`;
         }
-        // 具体 iOS 设备（模拟器 / 真机），与 Android 心智一致：一台一个 tab
+        // 具体 iOS 真机（每台一个 tab，与 Android 心智一致）
         const devKey = d.device_key || String(d.serial).slice(4);
         const label = truncate(deviceLabel(devKey), 22);
         return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS ${escapeHtml(devKey)} · Safari / App 内 WKWebView">${escapeHtml(label)}<span class="sub">iOS</span></button>`;
@@ -351,28 +351,29 @@ function renderIosList(ios) {
     el.innerHTML = '<div class="' + cls + '">' + html + "</div>";
   };
   if (!ios) return show("err", "后端未返回 iOS 桥状态");
-  if (!ios.supported) return show("err", "iOS 调试仅支持 macOS（桥依赖 usbmuxd / webinspectord_sim）。");
-  if (!ios.bun) return show("err",
-    "未检测到 bun 运行时：<code>curl -fsSL https://bun.sh/install | bash</code>（或 <code>brew install oven-sh/bun</code>），装好后刷新页面。");
+  if (!ios.supported) return show("err", "当前环境不支持 iOS 真机调试（pymobiledevice3 不可用）。");
+  if (!ios.tool) return show("err",
+    "未检测到 pymobiledevice3 引擎：<code>brew install pymobiledevice3</code>（或 <code>pipx install pymobiledevice3</code>），装好后刷新页面。");
   if (ios.error) return show("err", "iOS 调试桥异常：" + escapeHtml(ios.error));
   if (ios.starting && !ios.running) return show("empty",
-    "iOS 调试桥启动中…（首次会下载 inspect-webkit，约 10~60 秒，此页每 5 秒自动刷新）");
+    "iOS 调试桥启动中…（pymobiledevice3 连接真机，约 5~20 秒，此页每 5 秒自动刷新）");
   const list = (ios.targets || []).filter((t) => t.ws);
   dot.className = "dot" + (list.length ? " on" : "");
   if (!list.length) return show("empty",
-    "无可调试目标：<br>· 模拟器 / 手机 Safari：先打开页面；<br>· iPhone 真机：先在 Finder（访达）侧栏点该设备 → 手机弹窗点「信任此电脑」并解锁，"
+    "无可调试目标：<br>· iPhone 真机 Safari：先在手机上打开要调试的页面；<br>"
+    + "· 首次连接：Finder（访达）侧栏点该设备 → 手机弹窗点「信任此电脑」并解锁，"
     + "再到手机 设置→Safari→高级→打开「Web 检查器」；<br>· App 内 H5：App 需允许 Web Inspector（一般 Debug 包开启）。");
   const uniqDevs = list.map((t) => t.device || "?").filter((v, i, a) => a.indexOf(v) === i);
   if (uniqDevs.length <= 1) {
     // 单设备（device=ios:xxx 已按设备过滤）：直接平铺目标卡，与 Android 心智一致
     el.innerHTML = list.map((t) => {
       targets[t.id] = t;
-      const badge = (t.app || "").split(".").pop() || t.type || "page";
+      const badge = (t.app || "").split(".").pop() || "iOS";
       return targetCard(t, badge);
     }).join("");
     return;
   }
-  // 多设备兜底（占位入口全量模式）：device（sim:xxx / dev:xxx）→ 组头 + 页面卡
+  // 多设备兜底（占位入口全量模式）：device（udid）→ 组头 + 页面卡
   const groups = {};
   list.forEach((t) => {
     const k = t.device || "unknown";
@@ -385,27 +386,27 @@ function renderIosList(ios) {
       .map((a) => escapeHtml(a.split(".").pop() || a)).join(" / ");
     return (
       '<div class="dev-group"><span class="dg-id">' + escapeHtml(deviceLabel(dev)) +
-        '</span><span class="dg-app">' + apps +
-        '</span><span class="dg-cnt">' + items.length + ' 页</span></div>' +
+        '</span>' + (apps ? '<span class="dg-app">' + apps + '</span>' : "") +
+        '<span class="dg-cnt">' + items.length + ' 页</span></div>' +
       items.map((t) => {
         targets[t.id] = t;
-        const badge = (t.app || "").split(".").pop() || t.type || "page";
+        const badge = (t.app || "").split(".").pop() || "iOS";
         return targetCard(t, badge);
       }).join("")
     );
   }).join("");
 }
 
-// iOS 设备标识 → 可读标签（sim=模拟器 / device=真机）
+// iOS 设备标识 → 可读标签（device:xxx / 纯 udid 都当真机；sim=模拟器 历史兼容）
 function deviceLabel(dev) {
   if (!dev) return "未知设备";
   const idx = dev.indexOf(":");
-  const scope = idx > 0 ? dev.slice(0, idx) : dev;
-  let id = idx > 0 ? dev.slice(idx + 1) : "";
+  const scope = idx > 0 ? dev.slice(0, idx) : "device";
+  const id = idx > 0 ? dev.slice(idx + 1) : dev;
   // 真机 USB 序列号较长（00008030-000E444C2198402E），保留前 13 位区分即可
-  if (scope === "device" && id.length > 13) id = id.slice(0, 13);
+  const shortId = (scope === "device" && id.length > 13) ? id.slice(0, 13) : id;
   const kind = scope === "sim" ? "模拟器" : (scope === "device" ? "真机" : scope);
-  return (kind + " " + id).trim();
+  return (kind + " " + shortId).trim();
 }
 
 // 区块标题/提示随平台切换

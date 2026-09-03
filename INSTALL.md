@@ -18,7 +18,7 @@
 |------|------|
 | **12787** | 本服务 HTTP 控制台（`http://127.0.0.1:12787/`） |
 | **9222**  | 手机 WebView 的 CDP 调试端口（`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`，多设备按槽位偏移） |
-| **9322**  | iOS 桥端口（`inspect-webkit` 子进程，env `H5TOOL_IOS_PORT` 可覆盖；占用时启动会明确报错） |
+| **9322**  | iOS 桥端口（`pymobiledevice3 webinspector cdp` 子进程，每台真机一个实例按槽位偏移，env `H5TOOL_IOS_PORT` 可覆盖基端口；占用时启动会明确报错） |
 | **27183** | scrcpy 视频流（设备端 H.264 → 浏览器 WebCodecs，多设备按槽位偏移） |
 
 ### 核心文件
@@ -28,6 +28,7 @@
 | `server.py` | HTTP 服务 + 路由（/api/*、/devtools/、/cdp-ws/） |
 | `cdp.py` | 纯 Python CDP 客户端（WebSocket 握手 + Page.navigate / Runtime.evaluate） |
 | `scr_stream.py` | scrcpy 视频流（SPS/PPS 缓存、中断降级） |
+| `ios_bridge.py` | iOS 真机 CDP 桥（spawn `pymobiledevice3 webinspector cdp`，每台真机一个实例） |
 | `web/` | 前端页面（index.html 控制台、devtools.html 调试入口） |
 | `devtools-local/front_end/` | devtools-frontend 构建产物（438MB，已 gitignore，可用远程替代） |
 | `bin/h5-tool.js` | npm CLI 入口（`start` / `status` / `stop`，负责探测 Python 并拉起 server.py） |
@@ -40,7 +41,7 @@
 | Python | >= 3.8 | **必需** | 运行服务（纯标准库，无需 pip 装包） |
 | adb | 任意 | **必需** | 手机控制/CDP/截图/镜像 |
 | Node.js | >= 18 | 可选 | 仅重建 devtools-frontend 产物时需要 |
-| bun | 任意 | **macOS 调试 iOS 时需要** | 跑 `inspect-webkit` 桥（Node 跑不了）；`curl -fsSL https://bun.sh/install | bash` 或 `brew install oven-sh/bun`；也可用 `H5TOOL_BUN` env 指定路径 |
+| pymobiledevice3 | >= 7.0（推荐最新） | **调试 iOS 真机时需要** | 跑 `webinspector cdp` 子命令做 WIR → CDP 翻译；`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`（也可 `H5TOOL_PMD3` env 指定路径或 `uvx pymobiledevice3` 兜底）。注意：**仅支持真机，不支持 iOS 模拟器** |
 | devtools 产物 | — | 可选 | WebView 调试面板；缺失不影响其余功能 |
 
 ---
@@ -74,7 +75,9 @@ h5-tool start      # 启动后端
 python3 --version        # >= 3.8；Windows 可能是 py -3 / python
 # 2) 确认 adb
 adb devices              # 应能看到设备（手机需开 USB 调试并授权）
-# 3) 本项目无第三方 Python 依赖，不需要 pip install。
+# 4) pymobiledevice3（iOS 真机调试需要）：
+#    macOS: brew install pymobiledevice3
+#    其它平台: pipx install pymobiledevice3（Windows 还需要装 Apple Devices/iTunes 提供 usbmuxd）
 # 4) devtools 产物（可选）：
 #    - 本地：把 front_end 目录放到 devtools-local/front_end/
 #    - 远程：export DEVTOOLS_DIR=http://服务器:端口/devtools （见第 5 节）
@@ -133,6 +136,8 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 |------|------|------|
 | `DEVTOOLS_DIR` | devtools 产物来源。**以 `http://`/`https://` 开头 = 远程反代模式**，否则当本地目录；不设置默认 `devtools-local/front_end/` | `DEVTOOLS_DIR=/data/front_end` 或 `DEVTOOLS_DIR=http://10.0.0.5:8080/devtools` |
 | `PYTHON` | 指定 python 解释器（bin/h5-tool.js 优先用它） | `PYTHON=/usr/bin/python3 h5-tool start` |
+| `H5TOOL_IOS_PORT` | iOS 桥基端口（多台真机按槽位偏移；默认 `9322`） | `H5TOOL_IOS_PORT=9399 h5-tool start` |
+| `H5TOOL_PMD3` | 显式指定 `pymobiledevice3` 可执行路径；未设则按 `PATH pymobiledevice3 → uvx pymobiledevice3` 兜底探测 | `H5TOOL_PMD3=/opt/homebrew/bin/pymobiledevice3 h5-tool start` |
 
 远程模式下 h5-tool 自动从服务器拉取资源并缓存到 `devtools-local/.remote-cache/`，
 前端仍统一走本地 `/devtools/`，服务器不可达时仅面板不可用、其余功能不受影响。
@@ -163,6 +168,7 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 |------------|------|------|
 | 控制台右上角 WebView 红灯，`webview_error: 未找到 WebView` | App 未开启 `WebView.setWebContentsDebuggingEnabled(true)`；或当前没打开 H5 页面 | 让客户端开调试开关（仅测试包）；先打开 H5 页面再刷新 |
 | `webview_error: 未检测到已连接的设备` | adb devices 为空 | 见安装阶段 adb 条目 |
+| iOS 调试区显示「端口 9322 已被其它进程占用」 | 上一次 iOS 桥进程没正常退出（强杀 server、TaskStop 等走不到 atexit） | `lsof -ti tcp:9322 \| xargs kill -9` 后回到页面刷新即可（占位的 iOS tab 会触发懒启动重拉桥） |
 | 执行 JS 报 `CDP 命令超时` | WebView 刚重建 / 页面在跳转 | 自动重连一次后仍失败就等 1-2s 重试；页面导航后 target 会变 |
 | `Runtime.evaluate` 结果不符预期 | 页面上下文限制 | 确认表达式在页面上下文（非 iframe）；可先 `location.href` 验证 |
 

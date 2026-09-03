@@ -48,7 +48,7 @@ from cdp import (CDPError, CDPSession, _http_get_json, run_adb, WebSocketClient,
 from scr_stream import StreamError, get_streamer, stop_all
 import ios_bridge
 
-# 进程退出时清理：设备端 scrcpy server 与转发、iOS inspect-webkit 桥
+# 进程退出时清理：设备端 scrcpy server 与转发、iOS pymobiledevice3 桥
 atexit.register(stop_all)
 atexit.register(ios_bridge.stop_all)
 
@@ -576,37 +576,36 @@ def _pick_targets(pages):
 
 
 def get_devices():
-    """设备列表：Android 真机（现状）+ iOS 设备（inspect-webkit，每台一个 tab）。
+    """设备列表：Android 真机（现状）+ iOS 真机（pymobiledevice3，每台一个 tab）。
 
     iOS 部分三种形态（与 Android 设备 tab 并列，语义一致）：
-      - 桥已就绪且有设备 → 每台一个条目，serial 形如 "ios:sim:32451"
+      - usbmux 有真机 → 每台一个条目，serial 形如 "ios:<udid>"
         （前端 tab 可直接切换单设备调试，与 Android 心智一致）
-      - darwin + bun、桥未就绪/无设备 → 单个占位条目（serial="ios"，
+      - 引擎可用但桥未就绪/暂无真机 → 单个占位条目（serial="ios"，
         点击即懒启动桥并给出配对/引导文案）
-      - 非 darwin → 不加条目（该功能不可用，不展示）
+      - 引擎缺失 → 占位条目带 error（前端给出安装指引）
     Android 条目保持原字段；devtools.html 消费本接口，主控台走 /api/status。
     """
     ios = ios_bridge.status()
     entries = list_devices()
     if ios.get("supported"):
-        if ios.get("running") and ios.get("bun"):
+        if ios.get("running") and ios.get("tool"):
             devs = ios_bridge.devices()
             if devs:
                 for d in devs:
-                    label = ("模拟器" if d["scope"] == "sim"
-                             else "iPhone" if d["scope"] == "device"
+                    label = ("iPhone" if d["scope"] == "device"
                              else d["scope"])
                     entries.append({
-                        "serial": "ios:" + d["key"],   # ios:sim:32451
+                        "serial": "ios:" + d["key"],   # ios:00008030-...
                         "platform": "ios", "state": "device",
                         "model": label + " (iOS)", "product": None,
                         "device_key": d["key"],
-                        "supported": True, "bun": True,
+                        "supported": True, "tool": True,
                     })
             else:
-                entries.append(_ios_idle_entry(ios))   # 桥在跑但暂无设备
+                entries.append(_ios_idle_entry(ios))   # 桥在跑但暂无真机
         else:
-            entries.append(_ios_idle_entry(ios))       # 未启动/缺 bun，占位引导
+            entries.append(_ios_idle_entry(ios))       # 未启动/缺引擎，占位引导
     return {"devices": entries, "default": default_serial(), "adb": adb_available()}
 
 
@@ -614,8 +613,8 @@ def _ios_idle_entry(ios):
     """iOS 占位设备条目：桥未就绪或暂无设备时给出入口与状态提示。"""
     return {
         "serial": "ios", "platform": "ios", "state": "idle",
-        "model": "iOS (inspect-webkit)", "product": None,
-        "supported": ios.get("supported"), "bun": ios.get("bun"),
+        "model": "iOS (pymobiledevice3)", "product": None,
+        "supported": ios.get("supported"), "tool": ios.get("tool"),
         "running": ios.get("running"), "starting": ios.get("starting"),
         "error": ios.get("error"),
     }
@@ -624,18 +623,17 @@ def _ios_idle_entry(ios):
 def get_ios_webview_targets(devkey=None):
     """iOS 桥目标汇总：懒启动（幂等、后台线程、立即返回）+ 状态 + targets。
 
-    devkey 形如 "sim:32451"（对应 device=ios:sim:32451 的单设备 tab）；
-    为空（占位 tab / 全量）时返回所有目标。轮询本接口即可等到就绪。
+    devkey 为设备 udid（对应 device=ios:<udid> 的单设备 tab）；
+    为空（占位 tab / 全量）时聚合所有真机目标。轮询本接口即可等到就绪。
     """
-    ios_bridge.ensure_started()
+    ios_bridge.ensure_started(devkey)
     st = ios_bridge.status()
     targets, terr = None, st.get("error")
     if st.get("running"):
         try:
-            ts = ios_bridge.targets() or []
-            if devkey:
-                ts = [t for t in ts if t.get("device") == devkey]
-            targets = ts
+            ts = ios_bridge.targets(devkey)
+            if ts is not None:
+                targets = ts
         except Exception as e:
             terr = str(e)
     return {
@@ -645,7 +643,7 @@ def get_ios_webview_targets(devkey=None):
             "running": st.get("running"),
             "starting": st.get("starting"),
             "supported": st.get("supported"),
-            "bun": st.get("bun"),
+            "tool": st.get("tool"),
             "port": st.get("port"),
             "targets": targets,
             "error": terr,
@@ -793,17 +791,18 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
 
     browser_sock 已由 Handler 完成握手；target 侧复用 cdp.WebSocketClient
     （握手不带 Origin：Android WebView 的 9222、iOS 桥的 9322 才能 101）。
-    serial == "ios" 时上游为 inspect-webkit 桥（不做任何 adb 操作，无 Android 设备也可用）。
+    serial == "ios" 时上游为 pymobiledevice3 桥（不做任何 adb 操作，无 Android 设备也可用）。
     """
-    if serial and serial.startswith("ios"):   # ios（占位）或 ios:sim:32451（单设备）
-        if not ios_bridge.is_running():
+    if serial and serial.startswith("ios"):   # ios（占位）或 ios:<udid>（单设备）
+        udid = serial.split(":", 1)[1] if serial.startswith("ios:") else None
+        port = ios_bridge.port_for(udid)
+        if port is None:
             try:
                 _write_ws_frame(browser_sock, 0x8, b"", fin=True)
             except Exception:
                 pass
-            access_log.log("[cdp] iOS 桥未运行，拒绝代理连接")
+            access_log.log("[cdp] iOS 桥未就绪，拒绝代理连接")
             return
-        port = ios_bridge.bridge.port
     else:
         if serial is None:
             serial = default_serial()
@@ -1508,17 +1507,17 @@ def check_adb_startup():
 
 
 def check_ios_startup():
-    """启动时探测 iOS 调试可用性：非 macOS / 缺 bun 只提示不阻断（桥懒启动）。"""
+    """启动时探测 iOS 调试可用性：缺 pymobiledevice3 只提示不阻断（桥懒启动）。"""
     st = ios_bridge.status()
     if not st.get("supported"):
         return
-    if st.get("bun"):
-        print(f"[h5-tool] iOS 调试可用（inspect-webkit 桥，端口 {st['port']}，需要时自动启动）", flush=True)
+    if st.get("tool"):
+        print(f"[h5-tool] iOS 调试可用（pymobiledevice3 桥，端口 {st['port'] or '按需'}，需要时自动启动）", flush=True)
         return
     print_warn_red([
-        "⚠ 未检测到 bun（iOS Safari / App WebView 调试需要）！",
-        "   安装：curl -fsSL https://bun.sh/install | bash",
-        "   或：brew install oven-sh/bun；也可用 H5TOOL_BUN 环境变量指定路径。",
+        "⚠ 未检测到 pymobiledevice3（iOS Safari / App WebView 调试需要）！",
+        "   安装：brew install pymobiledevice3",
+        "   或：pipx install pymobiledevice3；也可用 H5TOOL_PMD3 环境变量指定路径。",
         "   装好后重启 h5-tool 即可（不影响 Android 调试）。",
     ])
 
@@ -1538,7 +1537,7 @@ def main():
 
     # 启动即检测 adb：未安装则标红提示（不阻断，见 check_adb_startup）
     check_adb_startup()
-    # 启动即检测 iOS 调试前置（macOS + bun），缺失只提示不阻断
+    # 启动即检测 iOS 调试前置（pymobiledevice3 引擎），缺失只提示不阻断
     check_ios_startup()
 
     if not args.no_clip_sync:

@@ -1,6 +1,6 @@
-# h5-tool 集成 iOS WebView 调试（基于 inspect-webkit）方案与开发计划
+# h5-tool 集成 iOS WebView 调试（基于 pymobiledevice3）方案与开发计划
 
-> 状态：**已上线 0.2.0**（2026-09-03 完成 P0/P1/P2/P3；模拟器全链路验证通过：懒启动 → 目标列表 → /cdp-ws 代理 Runtime.enable + eval 1+1=2）。
+> 状态：**已上线 0.3.0**（2026-09-03 P5 完成：iOS 桥从 inspect-webkit 切换到 pymobiledevice3；真机 iPhone 11 iOS 26.5 全链路验证通过：懒启动 → 目标列表 → /cdp-ws 代理 Runtime.evaluate 1+1=2 → 真机页面执行）。
 > 范围：一期只做 **iOS Web 调试**（目标列表 + 内嵌完整 DevTools），不做 iOS 截图/点击/镜像（iOS 协议限制，见「能力边界」）。
 > 原则：**Android 与 iOS 共用同一套 API（/api/webview-targets），只在返回结果里区分平台；devtools.html 一套 UI 同时兼容两种设备。**
 
@@ -8,9 +8,10 @@
 
 ## 1. 背景
 
-iOS Safari / App 内 WKWebView 没有原生 CDP，官方只有 WebKit 私有调试协议（WIR）。社区方案 inspect-webkit（npm，MIT，Evan Bacon 出品，0.0.5）在 macOS 上把 WIR 翻译成标准 CDP，并提供 `http://localhost:<port>/json/list` + WebSocket 端点——与 h5-tool 现有的 Android 调试链路（`/json` → `/cdp-ws` 代理 → devtools-frontend）**协议形态完全一致**，天然可复用整套 UI 与代理。
+iOS Safari / App 内 WKWebView 没有原生 CDP，官方只有 WebKit 私有调试协议（WIR）。`pymobiledevice3`（doronz88 出品，2026-09 最新 11.3.x）通过 `webinspector cdp` 子命令在本地起 CDP server（FastAPI/uvicorn），把 iPhone/iPad 的 Safari 与 WKWebView 翻译成标准 CDP 端点（`/json/version` + `/json/list` + `/devtools/page/*` ws），与 h5-tool 现有的 Android 调试链路（`/json` → `/cdp-ws` 代理 → devtools-frontend）**协议形态完全一致**，天然可复用整套 UI 与代理。
 
-集成方式：server.py 以子进程方式拉起 `bunx inspect-webkit`（端口 **9322**），作为 iOS 上游。
+集成方式：server.py 对每台真机 spawn 一个 `pymobiledevice3 webinspector cdp --port 9322+slot --udid <udid>` 子进程，作为 iOS 上游。
+**前置条件**：本机已装 `pymobiledevice3`（`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`），依赖 usbmuxd（Windows 上需 Apple Devices/iTunes）；**仅支持真机，不支持 iOS 模拟器**。
 
 ## 2. 现状盘点（可复用资产）
 
