@@ -105,6 +105,27 @@ async function refreshStatus() {
   try {
     const s = await (await fetch(apiUrlDev("/api/status"), fetchOpts())).json();
     updateConnUI(true);
+    // adb 未安装：整页标红（横幅 + 设备栏红字），跳过设备/WebView 渲染
+    const adbOk = !s.adb || s.adb.installed;
+    const adbBanner = $("adbBanner");
+    if (adbBanner) adbBanner.hidden = adbOk;
+    if (!adbOk) {
+      $("deviceTabs").innerHTML =
+        '<span class="tab-empty" style="color:var(--err);font-weight:600;">⚠ adb 未安装</span>';
+      $("dotDevice").className = "dot off";
+      $("deviceLabel").style.color = "var(--err)";
+      $("deviceLabel").textContent = "adb 未安装";
+      $("dotWebview").className = "dot off";
+      $("dotWebview").title = s.adb.error || "adb 未安装";
+      webviewOk = false;
+      const wvHint = $("wvHint");
+      if (wvHint) wvHint.hidden = true;
+      document.querySelectorAll(".js-eval-btn, .js-send-btn").forEach((b) => {
+        b.disabled = true;
+      });
+      return;
+    }
+    $("deviceLabel").style.color = "";
     renderDeviceSelect(s.devices, s.device);
     $("dotDevice").className = "dot " + (s.device_connected ? "on" : "off");
     $("deviceLabel").textContent = s.device || "无设备";
@@ -130,7 +151,10 @@ async function refreshStatus() {
     }
   } catch (e) {
     updateConnUI(false);
+    const adbBanner = $("adbBanner");
+    if (adbBanner) adbBanner.hidden = true; // 后端不可达时只提示未连接，不误报 adb
     $("dotDevice").className = "dot off";
+    $("deviceLabel").style.color = "";
     $("deviceLabel").textContent = "后端未连接";
   }
 }

@@ -42,6 +42,13 @@
     display: grid; grid-template-columns: 400px 1fr; gap: 0;
   }
   .panel { overflow-y: auto; padding: 14px; border-right: 1px solid var(--border); }
+  /* adb 未安装红色警示 */
+  .adb-banner {
+    background: rgba(255, 92, 108, .10); border: 1px solid var(--err);
+    color: var(--err); font-size: 12.5px; line-height: 1.65;
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;
+  }
+  .adb-banner code { background: rgba(255, 92, 108, .15); color: var(--err); }
   .section { margin-bottom: 18px; }
   .section h2 {
     font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
@@ -131,6 +138,10 @@
 </header>
 <div class="layout">
   <div class="panel">
+    <div class="adb-banner" id="adbBanner" hidden>
+      ⚠ 未检测到 adb（Android 调试桥），截图 / 点击 / WebView 调试等功能不可用。
+      macOS 安装 <code>brew install android-platform-tools</code>，装好后刷新页面。
+    </div>
     <div class="section">
       <h2><span class="dot" id="dotPhone"></span>手机 WebView</h2>
       <div id="phoneList"></div>
@@ -210,6 +221,14 @@ async function loadDevices() {
   try {
     const r = await fetch(apiUrl("/api/devices"), fetchOpts());
     const data = await r.json();
+    // adb 未安装：红色横幅 + 设备栏红字（区别于"无设备"）
+    const adbOk = !data.adb || data.adb.installed;
+    const adbBanner = $("adbBanner");
+    if (adbBanner) adbBanner.hidden = adbOk;
+    if (!adbOk) {
+      box.innerHTML = '<span class="tab-empty" style="color:var(--err);font-weight:600;">⚠ adb 未安装</span>';
+      return;
+    }
     if (!data.devices || !data.devices.length) {
       box.innerHTML = '<span class="tab-empty">无设备</span>';
       return;
@@ -226,6 +245,8 @@ async function loadDevices() {
     if (keep !== device) { device = keep; try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {} }
   } catch (e) {
     box.innerHTML = '<span class="tab-empty">后端未连接</span>';
+    const adbBanner = $("adbBanner");
+    if (adbBanner) adbBanner.hidden = true; // 后端不可达时只提示未连接，不误报 adb
   }
 }
 

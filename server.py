@@ -44,7 +44,7 @@ class QuietHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 from cdp import (CDPError, CDPSession, _http_get_json, run_adb, WebSocketClient,
-                 resolve_port, default_serial, list_devices, CDP_PORT)
+                 resolve_port, default_serial, list_devices, CDP_PORT, adb_available)
 from scr_stream import StreamError, get_streamer, stop_all
 
 # 进程退出时清理所有设备的设备端 scrcpy server 与转发
@@ -536,6 +536,7 @@ def get_status(serial=None):
         "device": serial,
         "devices": devices,
         "device_connected": bool(devices),
+        "adb": adb_available(),
         "webview": None,
         "current_url": None,
         "screen": None,
@@ -1108,7 +1109,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(get_status(device))
             elif path == "/api/devices":
                 self._send_json({"devices": list_devices(),
-                                 "default": default_serial()})
+                                 "default": default_serial(),
+                                 "adb": adb_available()})
             elif path == "/api/webview-targets":
                 self._send_json(get_webview_targets(device))
             elif path == "/api/screenshot":
@@ -1378,6 +1380,33 @@ def open_browser(url):
         print(f"[h5-tool] 未能自动打开浏览器，可手动访问：{url}\n  {e}", flush=True)
 
 
+def print_warn_red(lines):
+    """整块红色输出告警。tty 用 ANSI 红色，重定向/Windows 控制台降级为普通文本。"""
+    block = "\n".join(f"[h5-tool] {ln}" for ln in lines)
+    if sys.stdout.isatty() and sys.platform != "win32":
+        print("\033[1;31m" + block + "\033[0m", flush=True)
+    else:
+        print(block, flush=True)
+
+
+def check_adb_startup():
+    """启动时检测 adb，未安装只标红提示不阻断（页面/剪贴板等功能仍可先起）。"""
+    info = adb_available()
+    if info["installed"]:
+        print(f"[h5-tool] adb 可用：{info['version'] or info['path']}", flush=True)
+        return
+    reason = (info.get("error") or "adb 未安装").split("。")[0]
+    print_warn_red([
+        "⚠ 未检测到 adb（Android 调试桥）！",
+        f"   原因：{reason}",
+        "   截图 / 点击 / WebView 调试 / 剪贴板同步等功能依赖 adb，当前不可用。",
+        "   安装（任选其一）后重启 h5-tool 即可：",
+        "     · macOS:  brew install android-platform-tools",
+        "     · Windows: 安装 Android SDK Platform-Tools 并加入 PATH",
+        "     · 或安装 Android Studio 后自带 platform-tools",
+    ])
+
+
 def main():
     parser = argparse.ArgumentParser(description="H5 小工具后端服务")
     parser.add_argument("--host", default="127.0.0.1")
@@ -1390,6 +1419,9 @@ def main():
 
     global SERVER_PORT, _clip_sync
     SERVER_PORT = args.port
+
+    # 启动即检测 adb：未安装则标红提示（不阻断，见 check_adb_startup）
+    check_adb_startup()
 
     if not args.no_clip_sync:
         _clip_sync = ClipboardSync()

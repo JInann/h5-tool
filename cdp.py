@@ -13,6 +13,7 @@ import base64
 import hashlib
 import json
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -33,6 +34,30 @@ def run_adb(cmd, timeout=10, serial=None):
     if serial:
         return _run(f"adb -s {serial} {cmd}", timeout=timeout)
     return _run(f"adb {cmd}", timeout=timeout)
+
+
+def adb_available():
+    """检测 adb 是否安装且可执行（启动/状态接口用，本机一次 30ms 级开销）。
+
+    返回 {"installed": bool, "path": str|None, "version": str|None, "error": str|None}
+    installed=False 时 error 给出原因与安装指引要点。
+    """
+    exe = shutil.which("adb")
+    if not exe:
+        return {
+            "installed": False, "path": None, "version": None,
+            "error": "adb 不在 PATH 中（Android 平台工具未安装）。macOS: brew install android-platform-tools",
+        }
+    try:
+        r = _run(f"adb version", timeout=5)
+    except Exception as e:
+        return {"installed": False, "path": exe, "version": None,
+                "error": f"adb version 执行失败：{e}"}
+    if r.returncode != 0:
+        return {"installed": False, "path": exe, "version": None,
+                "error": (r.stderr or r.stdout or "adb version 异常").strip()[:200]}
+    first = (r.stdout or "").strip().splitlines()[0] if r.stdout else ""
+    return {"installed": True, "path": exe, "version": first[:120], "error": None}
 
 
 def device_slot(serial, used_slots=()):

@@ -70,6 +70,25 @@ async function cmdStop() {
   fs.rmSync(PID_FILE, { force: true });
 }
 
+function checkAdb() {
+  // 启动前检测 adb：未安装只标红提示，不阻断启动（页面/剪贴板等功能仍可先起）
+  const r = spawnSync("adb", ["version"], { encoding: "utf8" });
+  if (r.status === 0) {
+    console.log(`✓ adb 可用：${(r.stdout || "").split("\n")[0]}`);
+    return true;
+  }
+  const plain = !process.stdout.isTTY || process.platform === "win32";
+  const c = (s) => (plain ? s : "\x1b[1;31m" + s + "\x1b[0m"); // 终端红色，非 tty/Windows 降级纯文本
+  console.log(c("\n⚠ 未检测到 adb（Android 调试桥）！"));
+  console.log(c("   截图 / 点击 / WebView 调试 / 剪贴板同步等功能依赖 adb，当前不可用。"));
+  console.log(c("   安装（任选其一）后重启 h5-tool 即可："));
+  console.log(c("     · macOS:   brew install android-platform-tools"));
+  console.log(c("     · Windows: 安装 Android SDK Platform-Tools 并加入 PATH"));
+  console.log(c("     · 或安装 Android Studio 后自带 platform-tools"));
+  console.log(c("   后端仍会继续启动，可先打开页面。\n"));
+  return false;
+}
+
 function cmdStart(extraArgs) {
   const args = extraArgs.filter((a) => a !== "start");
   // 默认启动后自动在浏览器打开调试面板（服务器部署版）；可传 --no-open-browser 关闭
@@ -83,6 +102,8 @@ function cmdStart(extraArgs) {
     console.error("包内缺少 server.py，安装异常");
     process.exit(1);
   }
+
+  checkAdb();
 
   const py = spawn(cmd, [...pyArgs, serverPath, ...args], {
     cwd: PKG_DIR, // server.py 用 Path(__file__).parent 定位 web/ 等，cwd 影响不大，但保持一致
