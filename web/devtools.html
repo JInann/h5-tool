@@ -16,10 +16,25 @@
     background: var(--bg); color: var(--text);
     height: 100vh; display: flex; flex-direction: column; overflow: hidden;
   }
-  header {
-    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 14px; flex-shrink: 0;
+  /* 顶部触发热区：header 收起时，鼠标移动到视口顶部并稍作停留即滑出 header */
+  #topZone {
+    position: fixed; top: 0; left: 0; right: 0; height: 8px; z-index: 55;
   }
+  #topZone::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: rgba(76, 141, 255, .0); transition: background .18s;
+  }
+  #topZone:hover::before { background: rgba(76, 141, 255, .55); }
+  /* header 自动收起：默认整体滑出视口（fixed），hover 顶部展开 */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px;
+    transform: translateY(0);
+    transition: transform .26s ease;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .25);
+  }
+  header.collapsed { transform: translateY(-100%); }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   .link { color: var(--accent); text-decoration: none; font-size: 13px; margin-left: auto; }
   .layout {
@@ -49,7 +64,17 @@
   .target {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px 12px; margin-bottom: 8px;
+    cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s;
   }
+  .target:hover { border-color: var(--accent2); }
+  /* 选中状态：右侧 iframe 正调试的目标 */
+  .target.active {
+    border-color: var(--accent);
+    background: rgba(76, 141, 255, .10);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .target.active .t-title { color: var(--accent); }
+  .target.active .badge { border-color: var(--accent); color: var(--accent); }
   .t-title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
   .badge {
     font-size: 11px; padding: 1px 7px; border-radius: 20px;
@@ -94,17 +119,12 @@
   .quick-nav .msg.ok { color: var(--ok); }
   .quick-nav .msg.err { color: var(--err); }
   #view { display: flex; flex-direction: column; min-height: 0; }
-  #viewInfo {
-    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
-    font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 10px;
-    flex-shrink: 0; word-break: break-all;
-  }
-  #viewInfo b { color: var(--text); font-weight: 500; }
   iframe { flex: 1; width: 100%; border: none; background: #fff; }
 </style>
 </head>
 <body>
-<header>
+<div id="topZone" title="鼠标移到这里展开顶部工具栏"></div>
+<header id="siteHeader" class="collapsed">
   <h1>WebView 调试 · 复用 Chrome DevTools</h1>
   <div class="device-tabs" id="deviceTabs" title="点击切换要调试的设备"><span class="tab-empty">加载中…</span></div>
   <a class="link" href="/">← 返回控制台</a>
@@ -133,7 +153,6 @@
     </div>
   </div>
   <div id="view">
-    <div id="viewInfo">选择一个目标开始调试…</div>
     <iframe id="frame" hidden></iframe>
   </div>
 </div>
@@ -174,6 +193,7 @@ const apiUrlDev = (path) => device
 
 const targets = {};
 const $ = (id) => document.getElementById(id);
+let activeTargetId = null;   // 当前在右侧 iframe 中调试的目标 id（列表选中态）
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -235,18 +255,36 @@ function renderList(listId, dotId, list, err) {
     .map((t) => {
       targets[t.id] = t;
       return (
-        '<div class="target">' +
+        '<div class="target' + (t.id === activeTargetId ? " active" : "") + '" data-id="' + t.id +
+          '" title="点击在右侧打开" onclick="openTarget(\'' + t.id + '\')">' +
           '<div class="t-title"><span class="badge">' + escapeHtml(t.type || "page") + "</span>" +
             escapeHtml(truncate(t.title, 40)) + "</div>" +
           '<div class="t-url">' + escapeHtml(t.url || "") + "</div>" +
           '<div class="ops">' +
-            '<button onclick="openTarget(\'' + t.id + '\')">内嵌打开</button>' +
-            '<button class="ghost" onclick="openWindow(\'' + t.id + '\')">新窗口</button>' +
+            '<button onclick="event.stopPropagation();openTarget(\'' + t.id + '\')">内嵌打开</button>' +
+            '<button class="ghost" onclick="event.stopPropagation();openWindow(\'' + t.id + '\')">新窗口</button>' +
           "</div>" +
         "</div>"
       );
     })
     .join("");
+}
+
+// 依据 activeTargetId 同步左侧列表选中态（轮询重绘后保持高亮）
+function updateTargetActive() {
+  document.querySelectorAll(".target").forEach((el) => {
+    el.classList.toggle("active", el.dataset.id === activeTargetId);
+  });
+}
+
+// DevTools 前端入口：显式配置优先；未配置则按当前页面 host 自动选同源路径。
+// 本机模式（页面从 127.0.0.1/localhost 打开）→ /devtools/inspector.html（h5-tool 自带）；
+// 服务器部署版（如 CloudBase，front_end 与 devtools.html 同根部署）→ /front_end/inspector.html。
+function devtoolsPanelUrl() {
+  if (CFG.devtoolsPanel) return CFG.devtoolsPanel;
+  const h = location.hostname;
+  const loopback = h === "127.0.0.1" || h === "localhost" || h === "::1" || h === "[::1]";
+  return loopback ? "/devtools/inspector.html" : "/front_end/inspector.html";
 }
 
 function devtoolsUrl(t) {
@@ -256,18 +294,17 @@ function devtoolsUrl(t) {
   // 后端地址从 config.js 取（分离模式下仍是使用者本机 127.0.0.1:12787）。
   const qs = device ? "?device=" + encodeURIComponent(device) : "";
   const bare = API_BASE.replace(/^https?:\/\//, "") + "/cdp-ws/" + t.id + qs;
-  const panel = CFG.devtoolsPanel || "/devtools/inspector.html";
-  return panel + "?ws=" + encodeURIComponent(bare);
+  return devtoolsPanelUrl() + "?ws=" + encodeURIComponent(bare);
 }
 
 function openTarget(id) {
   const t = targets[id];
   if (!t) return;
+  activeTargetId = id;         // 选中态
+  updateTargetActive();
   const frame = $("frame");
   frame.hidden = false;
-  $("viewInfo").innerHTML =
-    "<b>" + escapeHtml(truncate(t.title, 30)) + "</b> " + escapeHtml(t.url || "");
-  frame.src = devtoolsUrl(t);
+  frame.src = devtoolsUrl(t);  // 换 src 会自动重载，无需先清空
 }
 
 function openWindow(id) {
@@ -297,6 +334,48 @@ $("deviceTabs").addEventListener("click", (e) => {
 loadDevices();
 load();
 setInterval(load, 5000); // 目标列表每 5s 刷新（WebView 页面切换场景）
+
+// ---------- header 自动收起：默认隐藏，鼠标移动到视口顶部即展开 ----------
+(() => {
+  const header = document.getElementById("siteHeader");
+  const zone = document.getElementById("topZone");
+  let expandTimer = null, hideTimer = null;
+
+  const expand = () => header.classList.remove("collapsed");
+  const collapse = () => header.classList.add("collapsed");
+
+  // 悬停顶部热区并停留 200ms 再展开：快速滑过（如点 iframe 顶栏）不误触
+  zone.addEventListener("mouseenter", () => {
+    clearTimeout(hideTimer);
+    clearTimeout(expandTimer);
+    expandTimer = setTimeout(expand, 200);
+  });
+  zone.addEventListener("mouseleave", () => clearTimeout(expandTimer));
+
+  // 鼠标在 header 内保持展开；移出后 400ms 自动收起
+  header.addEventListener("mouseenter", () => {
+    clearTimeout(hideTimer);
+    clearTimeout(expandTimer);
+  });
+  header.addEventListener("mouseleave", () => {
+    hideTimer = setTimeout(collapse, 400);
+  });
+
+  // 兜底：鼠标贴到视口最顶部（≤2px）立即展开
+  document.addEventListener("mousemove", (e) => {
+    if (e.clientY <= 2) {
+      clearTimeout(expandTimer);
+      clearTimeout(hideTimer);
+      expand();
+    }
+  });
+
+  // 刚打开先展示 header 提示存在，随后自动收起
+  setTimeout(() => {
+    expand();
+    hideTimer = setTimeout(collapse, 2600);
+  }, 400);
+})();
 </script>
 
 <script>
