@@ -46,9 +46,11 @@ class QuietHTTPServer(ThreadingHTTPServer):
 from cdp import (CDPError, CDPSession, _http_get_json, run_adb, WebSocketClient,
                  resolve_port, default_serial, list_devices, CDP_PORT, adb_available)
 from scr_stream import StreamError, get_streamer, stop_all
+import ios_bridge
 
-# 进程退出时清理所有设备的设备端 scrcpy server 与转发
+# 进程退出时清理：设备端 scrcpy server 与转发、iOS inspect-webkit 桥
 atexit.register(stop_all)
+atexit.register(ios_bridge.stop_all)
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -573,12 +575,62 @@ def _pick_targets(pages):
     return out
 
 
-def get_webview_targets(serial=None):
-    """汇总可调试目标：指定设备 WebView（按设备槽位端口）。
+def get_devices():
+    """设备列表：Android 真机（现状）+ iOS 虚拟设备（inspect-webkit 桥入口）。
 
-    复用 cdp.setup()（幂等，自动建 adb forward 并刷新目标）。
+    iOS 条目恒定列出（不要求 darwin/bun 就绪），桥状态在 /api/webview-targets
+    懒启动时给出；Android 条目保持原字段 —— devtools.html 消费本接口，
+    主控台 index.html 走 /api/status，两者互不影响。
     """
-    result = {"device": serial, "phone": [], "phone_error": None}
+    ios = ios_bridge.status()
+    return {
+        "devices": list_devices() + [{
+            "serial": "ios", "platform": "ios", "state": "device",
+            "model": "iOS (inspect-webkit)", "product": None,
+            "supported": ios.get("supported"), "bun": ios.get("bun"),
+        }],
+        "default": default_serial(),
+        "adb": adb_available(),
+    }
+
+
+def get_ios_webview_targets():
+    """iOS 桥目标汇总：懒启动（幂等、后台线程、立即返回）+ 状态 + targets。
+
+    返回 ios 分区结构；调用方无需关心桥进程细节，轮询本接口即可等到就绪。
+    """
+    ios_bridge.ensure_started()
+    st = ios_bridge.status()
+    targets, terr = None, st.get("error")
+    if st.get("running"):
+        try:
+            targets = ios_bridge.targets()
+        except Exception as e:
+            terr = str(e)
+    return {
+        "device": "ios", "platform": "ios",
+        "phone": [], "phone_error": None,
+        "ios": {
+            "running": st.get("running"),
+            "starting": st.get("starting"),
+            "supported": st.get("supported"),
+            "bun": st.get("bun"),
+            "port": st.get("port"),
+            "targets": targets,
+            "error": terr,
+        },
+    }
+
+
+def get_webview_targets(serial=None):
+    """汇总可调试目标：device=ios → iOS 桥分区；其余 → Android WebView（现状）。
+
+    Android 分支复用 cdp.setup()（幂等，自动建 adb forward 并刷新目标）。
+    """
+    if serial == "ios":
+        return get_ios_webview_targets()
+    result = {"device": serial, "platform": "android",
+              "phone": [], "phone_error": None, "ios": None}
     try:
         if serial is None:
             serial = default_serial()
@@ -704,21 +756,32 @@ def _ws_pump(src, dst, dst_mask_key, reply_mask_key, dst_lock=None, reply_lock=N
 
 
 def handle_cdp_proxy(browser_sock, target_id, serial=None):
-    """浏览器 WebSocket <-> 指定设备 CDP 双向代理。
+    """浏览器 WebSocket <-> CDP 上游双向代理。
 
     browser_sock 已由 Handler 完成握手；target 侧复用 cdp.WebSocketClient
-    （握手不带 Origin，Android WebView 的 9222 才能 101）。
+    （握手不带 Origin：Android WebView 的 9222、iOS 桥的 9322 才能 101）。
+    serial == "ios" 时上游为 inspect-webkit 桥（不做任何 adb 操作，无 Android 设备也可用）。
     """
-    if serial is None:
-        serial = default_serial()
-    if serial is None:
-        try:
-            _write_ws_frame(browser_sock, 0x8, b"", fin=True)
-        except Exception:
-            pass
-        return
-    serials = [d["serial"] for d in list_devices()]
-    port = resolve_port(serial, CDP_PORT, serials)
+    if serial == "ios":
+        if not ios_bridge.is_running():
+            try:
+                _write_ws_frame(browser_sock, 0x8, b"", fin=True)
+            except Exception:
+                pass
+            access_log.log("[cdp] iOS 桥未运行，拒绝代理连接")
+            return
+        port = ios_bridge.bridge.port
+    else:
+        if serial is None:
+            serial = default_serial()
+        if serial is None:
+            try:
+                _write_ws_frame(browser_sock, 0x8, b"", fin=True)
+            except Exception:
+                pass
+            return
+        serials = [d["serial"] for d in list_devices()]
+        port = resolve_port(serial, CDP_PORT, serials)
     upstream = WebSocketClient(f"ws://127.0.0.1:{port}/devtools/page/{target_id}")
     try:
         upstream.connect()
@@ -1113,9 +1176,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/status":
                 self._send_json(get_status(device))
             elif path == "/api/devices":
-                self._send_json({"devices": list_devices(),
-                                 "default": default_serial(),
-                                 "adb": adb_available()})
+                self._send_json(get_devices())
             elif path == "/api/webview-targets":
                 self._send_json(get_webview_targets(device))
             elif path == "/api/screenshot":
@@ -1187,6 +1248,7 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
         except Exception as e:
+            access_log.log(f"[http] GET 异常: {e!r} | path={self.path[:120]}")
             self._send_json({"error": str(e)}, 500)
 
     def do_POST(self):
@@ -1412,6 +1474,22 @@ def check_adb_startup():
     ])
 
 
+def check_ios_startup():
+    """启动时探测 iOS 调试可用性：非 macOS / 缺 bun 只提示不阻断（桥懒启动）。"""
+    st = ios_bridge.status()
+    if not st.get("supported"):
+        return
+    if st.get("bun"):
+        print(f"[h5-tool] iOS 调试可用（inspect-webkit 桥，端口 {st['port']}，需要时自动启动）", flush=True)
+        return
+    print_warn_red([
+        "⚠ 未检测到 bun（iOS Safari / App WebView 调试需要）！",
+        "   安装：curl -fsSL https://bun.sh/install | bash",
+        "   或：brew install oven-sh/bun；也可用 H5TOOL_BUN 环境变量指定路径。",
+        "   装好后重启 h5-tool 即可（不影响 Android 调试）。",
+    ])
+
+
 def main():
     parser = argparse.ArgumentParser(description="H5 小工具后端服务")
     parser.add_argument("--host", default="127.0.0.1")
@@ -1427,6 +1505,8 @@ def main():
 
     # 启动即检测 adb：未安装则标红提示（不阻断，见 check_adb_startup）
     check_adb_startup()
+    # 启动即检测 iOS 调试前置（macOS + bun），缺失只提示不阻断
+    check_ios_startup()
 
     if not args.no_clip_sync:
         _clip_sync = ClipboardSync()

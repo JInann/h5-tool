@@ -143,10 +143,10 @@
       macOS 安装 <code>brew install android-platform-tools</code>，装好后刷新页面。
     </div>
     <div class="section">
-      <h2><span class="dot" id="dotPhone"></span>手机 WebView</h2>
+      <h2 id="secTitle"><span class="dot" id="dotPhone"></span>手机 WebView</h2>
       <div id="phoneList"></div>
     </div>
-    <div class="hint">
+    <div class="hint" id="secHint">
       点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>
       「新窗口」独立打开。<br>
       手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。
@@ -221,27 +221,38 @@ async function loadDevices() {
   try {
     const r = await fetch(apiUrl("/api/devices"), fetchOpts());
     const data = await r.json();
-    // adb 未安装：红色横幅 + 设备栏红字（区别于"无设备"）
+    // adb 未安装：横幅提示，但 iOS 入口不受影响（iOS 桥不依赖 adb）
     const adbOk = !data.adb || data.adb.installed;
     const adbBanner = $("adbBanner");
     if (adbBanner) adbBanner.hidden = adbOk;
-    if (!adbOk) {
+    const all = data.devices || [];
+    const android = all.filter((d) => d.platform !== "ios");
+    const ios = all.find((d) => d.platform === "ios");
+    if (!adbOk && !ios) {
       box.innerHTML = '<span class="tab-empty" style="color:var(--err);font-weight:600;">⚠ adb 未安装</span>';
       return;
     }
-    if (!data.devices || !data.devices.length) {
+    if (!all.length) {
       box.innerHTML = '<span class="tab-empty">无设备</span>';
       return;
     }
     let keep = device;
-    if (!data.devices.some((d) => d.serial === keep)) keep = data.default || data.devices[0].serial;
-    box.innerHTML = data.devices
-      .map((d) => {
-        const model = (d.model || "").replace(/_/g, " ") || "Android";
-        const active = d.serial === keep ? " active" : "";
-        return `<button class="device-tab${active}" data-serial="${d.serial}" title="序列号：${d.serial}">${model}<span class="sub">${d.serial}</span></button>`;
-      })
-      .join("");
+    const ids = all.map((d) => d.serial);
+    if (!ids.includes(keep)) {
+      // 偏好选择：无 Android（或 adb 不可用）但 iOS 可用时默认 iOS
+      const preferIos = ios && (!android.length || !adbOk);
+      keep = preferIos ? "ios" : (data.default && ids.includes(data.default) ? data.default : ids[0]);
+    }
+    box.innerHTML = all.map((d) => {
+      const active = d.serial === keep ? " active" : "";
+      if (d.platform === "ios") {
+        const warn = d.supported && !d.bun ? " ⚠" : "";
+        const sub = d.supported ? (d.bun ? "Safari/App" : "缺 bun") : "仅 macOS";
+        return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS Safari / App 内 WKWebView（macOS + bun）">iOS${warn}<span class="sub">${sub}</span></button>`;
+      }
+      const model = (d.model || "").replace(/_/g, " ") || "Android";
+      return `<button class="device-tab${active}" data-serial="${d.serial}" title="序列号：${d.serial}">${model}<span class="sub">${d.serial}</span></button>`;
+    }).join("");
     if (keep !== device) { device = keep; try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {} }
   } catch (e) {
     box.innerHTML = '<span class="tab-empty">后端未连接</span>';
@@ -251,7 +262,7 @@ async function loadDevices() {
 }
 
 async function load(showLoading) {
-  let data = { phone: [], phone_error: null };
+  let data = { phone: [], phone_error: null, ios: null };
   try {
     // 仅切换设备时显示"加载中"，轮询刷新（每 5s）不闪
     if (showLoading) {
@@ -262,7 +273,26 @@ async function load(showLoading) {
   } catch (e) {
     data.phone_error = "请求后端失败：" + e.message;
   }
-  renderList("phoneList", "dotPhone", data.phone, data.phone_error);
+  const isIos = device === "ios";
+  setSection(isIos ? "ios" : "android");
+  if (isIos) renderIosList(data.ios);
+  else renderList("phoneList", "dotPhone", data.phone, data.phone_error);
+}
+
+// 目标卡片（Android / iOS 共用）
+function targetCard(t, badge) {
+  return (
+    '<div class="target' + (t.id === activeTargetId ? " active" : "") + '" data-id="' + t.id +
+      '" title="点击在右侧打开" onclick="openTarget(\'' + t.id + '\')">' +
+      '<div class="t-title"><span class="badge">' + escapeHtml(badge) + "</span>" +
+        escapeHtml(truncate(t.title, 40)) + "</div>" +
+      '<div class="t-url">' + escapeHtml(t.url || "") + "</div>" +
+      '<div class="ops">' +
+        '<button onclick="event.stopPropagation();openTarget(\'' + t.id + '\')">内嵌打开</button>' +
+        '<button class="ghost" onclick="event.stopPropagation();openWindow(\'' + t.id + '\')">新窗口</button>' +
+      "</div>" +
+    "</div>"
+  );
 }
 
 function renderList(listId, dotId, list, err) {
@@ -275,20 +305,52 @@ function renderList(listId, dotId, list, err) {
     .filter((t) => t.ws)
     .map((t) => {
       targets[t.id] = t;
-      return (
-        '<div class="target' + (t.id === activeTargetId ? " active" : "") + '" data-id="' + t.id +
-          '" title="点击在右侧打开" onclick="openTarget(\'' + t.id + '\')">' +
-          '<div class="t-title"><span class="badge">' + escapeHtml(t.type || "page") + "</span>" +
-            escapeHtml(truncate(t.title, 40)) + "</div>" +
-          '<div class="t-url">' + escapeHtml(t.url || "") + "</div>" +
-          '<div class="ops">' +
-            '<button onclick="event.stopPropagation();openTarget(\'' + t.id + '\')">内嵌打开</button>' +
-            '<button class="ghost" onclick="event.stopPropagation();openWindow(\'' + t.id + '\')">新窗口</button>' +
-          "</div>" +
-        "</div>"
-      );
+      return targetCard(t, t.type || "page");
     })
     .join("");
+}
+
+// iOS 桥状态与目标渲染（懒启动 / 启动中 / 错误指引 / 目标列表）
+function renderIosList(ios) {
+  const el = $("phoneList");
+  const dot = $("dotPhone");
+  const show = (cls, html) => {
+    dot.className = "dot";
+    el.innerHTML = '<div class="' + cls + '">' + html + "</div>";
+  };
+  if (!ios) return show("err", "后端未返回 iOS 桥状态");
+  if (!ios.supported) return show("err", "iOS 调试仅支持 macOS（桥依赖 usbmuxd / webinspectord_sim）。");
+  if (!ios.bun) return show("err",
+    "未检测到 bun 运行时：<code>curl -fsSL https://bun.sh/install | bash</code>（或 <code>brew install oven-sh/bun</code>），装好后刷新页面。");
+  if (ios.error) return show("err", "iOS 调试桥异常：" + escapeHtml(ios.error));
+  if (ios.starting && !ios.running) return show("empty",
+    "iOS 调试桥启动中…（首次会下载 inspect-webkit，约 10~60 秒，此页每 5 秒自动刷新）");
+  const list = (ios.targets || []).filter((t) => t.ws);
+  dot.className = "dot" + (list.length ? " on" : "");
+  if (!list.length) return show("empty",
+    "无可调试目标：在 Safari 打开页面，或在 App 内打开 H5 页面（App 需允许 Web Inspector，一般 Debug 包开启）。");
+  el.innerHTML = list.map((t) => {
+    targets[t.id] = t;
+    const app = (t.app || "").split(".").pop() || "safari";
+    return targetCard(t, app);
+  }).join("");
+}
+
+// 区块标题/提示随平台切换
+function setSection(platform) {
+  const isIos = platform === "ios";
+  if ($("secTitle").lastChild) $("secTitle").lastChild.textContent = isIos ? " iOS Safari / App WebView" : " 手机 WebView";
+  const hint = $("secHint");
+  if (isIos) {
+    hint.innerHTML =
+      '点开在右侧使用完整 DevTools（console / 断点 / network / storage）。<br>' +
+      'iOS 需：Safari 打开页面，或 App 内打开 H5（App 需 <code>webView.isInspectable = true</code>，一般 Debug 包开启）。<br>' +
+      '注意：iOS 受系统限制无截图 / 录屏 / 点击能力，仅 Web 调试。';
+  } else {
+    hint.innerHTML =
+      '点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>' +
+      '「新窗口」独立打开。<br>手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。';
+  }
 }
 
 // 依据 activeTargetId 同步左侧列表选中态（轮询重绘后保持高亮）

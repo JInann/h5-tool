@@ -18,6 +18,7 @@
 |------|------|
 | **12787** | 本服务 HTTP 控制台（`http://127.0.0.1:12787/`） |
 | **9222**  | 手机 WebView 的 CDP 调试端口（`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`，多设备按槽位偏移） |
+| **9322**  | iOS 桥端口（`inspect-webkit` 子进程，env `H5TOOL_IOS_PORT` 可覆盖；占用时启动会明确报错） |
 | **27183** | scrcpy 视频流（设备端 H.264 → 浏览器 WebCodecs，多设备按槽位偏移） |
 
 ### 核心文件
@@ -39,6 +40,7 @@
 | Python | >= 3.8 | **必需** | 运行服务（纯标准库，无需 pip 装包） |
 | adb | 任意 | **必需** | 手机控制/CDP/截图/镜像 |
 | Node.js | >= 18 | 可选 | 仅重建 devtools-frontend 产物时需要 |
+| bun | 任意 | **macOS 调试 iOS 时需要** | 跑 `inspect-webkit` 桥（Node 跑不了）；`curl -fsSL https://bun.sh/install | bash` 或 `brew install oven-sh/bun`；也可用 `H5TOOL_BUN` env 指定路径 |
 | devtools 产物 | — | 可选 | WebView 调试面板；缺失不影响其余功能 |
 
 ---
