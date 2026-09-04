@@ -489,10 +489,12 @@ function setSection(platform) {
   if (isIos) {
     hint.innerHTML =
       '点开在右侧使用完整 DevTools（console / 断点 / network / storage）。<br>' +
-      'iOS 需：Safari 打开页面，或 App 内打开 H5（App 需 <code>webView.isInspectable = true</code>，一般 Debug 包开启）。<br>' +
-      'iOS 27+（系统已开放屏幕流服务）可点上方「屏幕镜像 + 点击滑动」实时看屏并触控；'
-      + 'iOS 26 及更早受系统限制镜像不可用（仅 Web 调试，与机型无关）。';
-    refreshMirrorEntry();   // 轮询/切设备时同步镜像入口状态（running / 启动中）
+      'iOS 需：Safari 打开页面，或 App 内打开 H5（App 需 <code>webView.isInspectable = true</code>，一般 Debug 包开启）。'
+      + (CFG.iosMirror
+          ? '<br>iOS 27+（系统已开放屏幕流服务）可点上方「屏幕镜像 + 点击滑动」实时看屏并触控；'
+            + 'iOS 26 及更早受系统限制镜像不可用（仅 Web 调试，与机型无关）。'
+          : '');
+    if (CFG.iosMirror) refreshMirrorEntry();   // 轮询/切设备时同步镜像入口状态（running / 启动中）
   } else {
     hint.innerHTML =
       '点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>' +
@@ -539,6 +541,7 @@ function closeMirrorModal() {
   $("mirrorFrame").src = "about:blank";
 }
 async function refreshMirrorEntry() {
+  if (!CFG.iosMirror) return;   // 配置隐藏：保持入口不显示
   const entry = $("mirrorEntry");
   const isIos = String(device || "").startsWith("ios");
   if (!entry || !isIos) return;

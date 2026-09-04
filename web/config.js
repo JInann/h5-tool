@@ -13,4 +13,7 @@ window.H5TOOL_CONFIG = {
   // 内部 ws://127.0.0.1 会被浏览器当第三方 mixed content 拦截（报「调试连接已关闭」）。
   // 如确有需要（前后端分离/自定义 CDN），可填完整 URL 或同域路径强制指定。
   devtoolsPanel: "",
+  // iOS 屏幕镜像入口：false（默认）= 隐藏（入口与提示不显示，功能代码保留）；
+  // true = 在 iOS 真机分区显示「📺 屏幕镜像 + 点击滑动」入口。
+  iosMirror: false,
 };
