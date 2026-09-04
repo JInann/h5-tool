@@ -598,6 +598,17 @@ def get_devices():
     return {"devices": entries, "default": default_serial(), "adb": adb_available()}
 
 
+def _ios_udid(device):
+    """serial「ios:<udid>」→ udid；iOS 占位「ios」或非 iOS → None。
+
+    供 /api/ios/*（webview targets、屏幕镜像）统一取设备标识。
+    """
+    if not device or not str(device).startswith("ios"):
+        return None
+    s = str(device)
+    return s.split(":", 1)[1] if ":" in s else None
+
+
 def get_ios_webview_targets(devkey=None):
     """iOS 桥目标汇总：懒启动（幂等、后台线程、立即返回）+ 状态 + targets。
 
@@ -607,6 +618,7 @@ def get_ios_webview_targets(devkey=None):
     ios_bridge.ensure_started(devkey)
     st = ios_bridge.status()
     targets, terr = None, st.get("error")
+    warning = None
     if st.get("running"):
         try:
             ts = ios_bridge.targets(devkey)
@@ -614,6 +626,15 @@ def get_ios_webview_targets(devkey=None):
                 targets = ts
         except Exception as e:
             terr = str(e)
+        # targets() 对单实例查询失败是 stale-while-error 兜底，不抛；这里把
+        # 「刷新失败 / 用的是缓存」明确透传给前端，避免被当成"真没页面"。
+        tstate = ios_bridge.targets_state()
+        if tstate.get("stale"):
+            warning = ("目标列表刷新失败（设备 Web 调试链路抖动），以下为几秒前的缓存结果；"
+                       "持续出现时试试在手机上重新打开页面或重启 App。详情："
+                       + (tstate.get("error") or ""))
+        elif tstate.get("error"):
+            warning = "目标列表查询失败：" + tstate.get("error")
     return {
         "device": "ios" + (":" + devkey if devkey else ""), "platform": "ios",
         "phone": [], "phone_error": None,
@@ -625,6 +646,7 @@ def get_ios_webview_targets(devkey=None):
             "port": st.get("port"),
             "targets": targets,
             "error": terr,
+            "targets_warning": warning,
         },
     }
 
@@ -1197,6 +1219,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_bytes(adb_screencap_png(device), "image/png")
             elif path == "/api/stream":
                 self._stream_video(device)
+            elif path == "/api/ios/mirror/status":
+                # iOS 屏幕镜像（serve-web viewer）状态：device=ios:<udid> 单台 /
+                # 不传则聚合。capable 探测结果 / 错误一次带回。
+                self._send_json(ios_bridge.mirror_status(_ios_udid(device)))
             elif path == "/api/claude-latency":
                 self._send_json(claude_latency_probe())
             elif path == "/api/clipboard":
@@ -1324,6 +1350,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"error": "未检测到已连接的设备"}, 400)
                 adb_text(device, body.get("text", ""))
                 self._send_json({"ok": True, "device": device})
+
+            elif path == "/api/ios/mirror/start":
+                # iOS 屏幕镜像：懒启动 serve-web 桥（幂等，立即返回，轮询 status 等就绪）。
+                # 顺带触发能力探测（get-media-support-info，后台，TTL 缓存）。
+                udid = _ios_udid(device)
+                if not udid:
+                    return self._send_json({"error": "缺少设备参数：device=ios:<udid>"}, 400)
+                ios_bridge.mirror_start(udid)
+                self._send_json({"ok": True, **ios_bridge.mirror_status(udid)})
+
+            elif path == "/api/ios/mirror/stop":
+                # 停止镜像：device=ios:<udid> 停单台；不传停全部（幂等）
+                ios_bridge.mirror_stop(_ios_udid(device))
+                self._send_json({"ok": True})
 
             elif path == "/api/clipboard/push":
                 # Mac -> 手机

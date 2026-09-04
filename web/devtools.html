@@ -16,27 +16,21 @@
     background: var(--bg); color: var(--text);
     height: 100vh; display: flex; flex-direction: column; overflow: hidden;
   }
-  /* 顶部触发热区：header 收起时，鼠标移动到视口顶部并稍作停留即滑出 header */
-  #topZone {
-    position: fixed; top: 0; left: 0; right: 0; height: 8px; z-index: 55;
+  /* 设备悬浮面板：常驻显示当前选中设备（绿色胶囊），hover 展开其它设备（黄色胶囊）。
+     选中胶囊始终在面板首位（锚点），展开向右侧/下方生长，选中位置不漂移。
+     按住面板可拖动，位置存 localStorage。 */
+  .dock {
+    position: fixed; top: 14px; left: 50%; z-index: 60;
+    transform: translateX(-50%);
+    padding: 6px; border-radius: 14px;
+    background: rgba(26, 29, 39, .88);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+    cursor: grab; user-select: none; -webkit-user-select: none;
+    touch-action: none;
   }
-  #topZone::before {
-    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: rgba(76, 141, 255, .0); transition: background .18s;
-  }
-  #topZone:hover::before { background: rgba(76, 141, 255, .55); }
-  /* header 自动收起：默认整体滑出视口（fixed），hover 顶部展开 */
-  header {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 60;
-    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 14px;
-    transform: translateY(0);
-    transition: transform .26s ease;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, .25);
-  }
-  header.collapsed { transform: translateY(-100%); }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  .link { color: var(--accent); text-decoration: none; font-size: 13px; margin-left: auto; }
+  .dock.dragging { cursor: grabbing; }
   .layout {
     flex: 1; min-height: 0;
     display: grid; grid-template-columns: 400px 1fr; gap: 0;
@@ -56,17 +50,31 @@
   }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
   .dot.on { background: var(--ok); }
-  /* 设备切换按钮组（平铺，点击切换） */
-  .device-tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; max-width: 520px; }
+  /* 设备切换：选中胶囊是面板首元素（锚点，永远不动），其余默认折叠，hover 展开 */
+  .device-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 0; max-width: min(600px, calc(100vw - 24px)); }
   .device-tab {
-    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 7px; padding: 4px 12px; font: inherit; font-size: 12.5px;
-    cursor: pointer; white-space: nowrap; transition: all .15s;
+    background: rgba(255, 255, 255, .7); border: 1px solid rgba(255, 255, 255, .85); color: #10151f;
+    border-radius: 999px; padding: 4px 13px; font: inherit; font-size: 12.5px;
+    cursor: pointer; white-space: nowrap; transition: background .15s, opacity .18s, transform .18s, padding .18s;
   }
-  .device-tab:hover { border-color: var(--accent); color: var(--accent); }
-  .device-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .device-tab .sub { opacity: .72; font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
-  .device-tab.active .sub { opacity: .85; }
+  .device-tab:hover { background: rgba(255, 255, 255, .88); }
+  .device-tab.active {
+    background: var(--ok); border-color: var(--ok); color: #05301b; font-weight: 600;
+    box-shadow: 0 2px 10px rgba(62, 207, 142, .35);
+  }
+  .device-tab.active:hover { background: var(--ok); }
+  .device-tab .sub { opacity: .75; font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .device-tab.active .sub { opacity: .9; }
+  /* 非选中设备默认折叠成 0 宽（不占位），hover 面板时展开 */
+  .device-tab:not(.active) {
+    width: 0; padding: 4px 0; border-width: 1px 0; opacity: 0; transform: scale(.78);
+    overflow: hidden;
+  }
+  .dock:hover .device-tab:not(.active),
+  .dock:focus-within .device-tab:not(.active) {
+    width: auto; padding: 4px 13px; border-width: 1px; opacity: 1; transform: scale(1);
+  }
+  .dock:hover .device-tabs, .dock:focus-within .device-tabs { gap: 6px; }
   .tab-empty { color: var(--muted); font-size: 12px; }
   .target {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -102,6 +110,12 @@
   .err { font-size: 12px; color: var(--err); }
   .empty { font-size: 12px; color: var(--muted); }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 4px; }
+  /* iOS 列表刷新失败 / 缓存兜底提示（黄色警示条） */
+  .ios-warn {
+    font-size: 12px; line-height: 1.6; color: #d9a441;
+    background: rgba(217, 164, 65, .08); border: 1px solid rgba(217, 164, 65, .35);
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; word-break: break-all;
+  }
   code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
   /* iOS 多设备分组头 */
   .dev-group {
@@ -137,15 +151,47 @@
   .quick-nav .msg.err { color: var(--err); }
   #view { display: flex; flex-direction: column; min-height: 0; }
   iframe { flex: 1; width: 100%; border: none; background: #fff; }
+  /* iOS 屏幕镜像（serve-web viewer 弹层 + 入口） */
+  #mirrorEntry { margin: 0 0 12px; display: flex; align-items: center; gap: 10px; }
+  #mirrorEntry[hidden] { display: none; }
+  #mirrorEntry button { padding: 7px 13px; }
+  #mirrorEntry .e-state { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mirror-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.62); z-index: 60;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .mirror-modal[hidden] { display: none; }
+  .mirror-card {
+    width: min(1100px, 100%); height: min(88vh, 920px);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .mirror-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 14px; border-bottom: 1px solid var(--border); font-size: 13px;
+  }
+  .mirror-bar .m-state { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mirror-bar .m-state.ok { color: var(--ok); }
+  .mirror-bar .m-state.err { color: var(--err); }
+  .mirror-bar button.ghost { padding: 5px 11px; font-size: 12px; }
+  .mirror-card iframe { flex: 1; width: 100%; border: none; background: #000; min-height: 0; }
+  .mirror-msg {
+    padding: 7px 14px; font-size: 12px; color: var(--warn); line-height: 1.6;
+    background: rgba(255,180,84,.08); border-bottom: 1px solid var(--border);
+  }
+  .mirror-msg.err { color: var(--err); background: rgba(255,92,108,.08); }
+  .mirror-msg[hidden] { display: none; }
+  .mirror-tip {
+    padding: 5px 14px; font-size: 11.5px; color: var(--muted); line-height: 1.6;
+    border-top: 1px solid var(--border); background: var(--panel2);
+  }
+
 </style>
 </head>
 <body>
-<div id="topZone" title="鼠标移到这里展开顶部工具栏"></div>
-<header id="siteHeader" class="collapsed">
-  <h1>WebView 调试 · 复用 Chrome DevTools</h1>
-  <div class="device-tabs" id="deviceTabs" title="点击切换要调试的设备"><span class="tab-empty">加载中…</span></div>
-  <a class="link" href="/">← 返回控制台</a>
-</header>
+<div class="dock" id="deviceDock" title="拖动位置 · 移入展开全部设备">
+  <div class="device-tabs" id="deviceTabs"><span class="tab-empty">加载中…</span></div>
+</div>
 <div class="layout">
   <div class="panel">
     <div class="adb-banner" id="adbBanner" hidden>
@@ -154,6 +200,12 @@
     </div>
     <div class="section">
       <h2 id="secTitle"><span class="dot" id="dotPhone"></span>手机 WebView</h2>
+      <!-- iOS 屏幕镜像入口（仅 iOS 真机 tab 显示） -->
+      <div id="mirrorEntry" hidden>
+        <button id="mirrorOpen">📺 屏幕镜像 + 点击滑动</button>
+        <span class="e-state" id="mirrorEntryState"></span>
+        <button class="ghost" id="mirrorStop" hidden>⏹ 停止</button>
+      </div>
       <div id="phoneList"></div>
     </div>
     <div class="hint" id="secHint">
@@ -175,6 +227,24 @@
   </div>
   <div id="view">
     <iframe id="frame" hidden></iframe>
+  </div>
+</div>
+
+<!-- iOS 屏幕镜像弹层：内嵌 pmd3 serve-web viewer（自带触摸控制） -->
+<div class="mirror-modal" id="mirrorModal" hidden>
+  <div class="mirror-card">
+    <div class="mirror-bar">
+      <b>📺 iOS 屏幕镜像（点画面=点击，按住拖动=滑动）</b>
+      <span class="m-state" id="mirrorState">—</span>
+      <button class="ghost" id="mirrorStopModal">⏹ 停止并关闭</button>
+      <button class="ghost" id="mirrorClose">✕ 收起（不停止）</button>
+    </div>
+    <div class="mirror-msg" id="mirrorMsg" hidden></div>
+    <iframe id="mirrorFrame"></iframe>
+    <div class="mirror-tip">
+      屏幕流需 iPhone 系统 iOS 27+（iOS 26 及更早不开放 displayservice，换机无用）；首次连接需 10~40 秒（起隧道 + 设备开媒体流）。
+      Windows 浏览器需支持 HEVC 解码（Chrome/Edge 需系统「HEVC 视频扩展」，Safari 无需）。
+    </div>
   </div>
 </div>
 
@@ -260,7 +330,12 @@ async function loadDevices() {
       else next = ids[0];
       keep = next;
     }
-    box.innerHTML = all.map((d) => {
+    // 渲染顺序：当前选中设备固定排第一（悬浮面板锚点，hover 展开时它不漂移）
+    const ordered = [
+      ...all.filter((d) => d.serial === keep),
+      ...all.filter((d) => d.serial !== keep),
+    ];
+    box.innerHTML = ordered.map((d) => {
       const active = d.serial === keep ? " active" : "";
       if (d.platform === "ios") {
         // iOS 真机：每台一个 tab（桥点击后才懒启动，见 /api/webview-targets）
@@ -271,6 +346,8 @@ async function loadDevices() {
       const model = (d.model || "").replace(/_/g, " ") || "Android";
       return `<button class="device-tab${active}" data-serial="${d.serial}" title="序列号：${d.serial}">${model}<span class="sub">${d.serial}</span></button>`;
     }).join("");
+    // dock 宽度就绪后固化位置（无记忆时按真实宽度居中），避免 translateX 随宽度变化
+    if (window.__dockEnsurePlaced) window.__dockEnsurePlaced();
     if (keep !== device) {
       device = keep;
       try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {}
@@ -336,9 +413,13 @@ function renderList(listId, dotId, list, err) {
 function renderIosList(ios) {
   const el = $("phoneList");
   const dot = $("dotPhone");
+  // 列表刷新失败/用了缓存兜底时的黄色警示条（ios.targets_warning 由后端透传）
+  const warn = (ios && ios.targets_warning)
+    ? '<div class="ios-warn">⚠ ' + escapeHtml(ios.targets_warning) + "</div>"
+    : "";
   const show = (cls, html) => {
     dot.className = "dot";
-    el.innerHTML = '<div class="' + cls + '">' + html + "</div>";
+    el.innerHTML = warn + '<div class="' + cls + '">' + html + "</div>";
   };
   if (!ios) return show("err", "后端未返回 iOS 桥状态");
   if (!ios.supported) return show("err", "当前环境不支持 iOS 真机调试（pymobiledevice3 不可用）。");
@@ -357,7 +438,7 @@ function renderIosList(ios) {
   const uniqDevs = list.map((t) => t.device || "?").filter((v, i, a) => a.indexOf(v) === i);
   if (uniqDevs.length <= 1) {
     // 单设备（device=ios:xxx 已按设备过滤）：直接平铺目标卡，与 Android 心智一致
-    el.innerHTML = list.map((t) => {
+    el.innerHTML = warn + list.map((t) => {
       targets[t.id] = t;
       const badge = (t.app || "").split(".").pop() || "iOS";
       return targetCard(t, badge);
@@ -371,7 +452,7 @@ function renderIosList(ios) {
     if (!groups[k]) groups[k] = [];
     groups[k].push(t);
   });
-  el.innerHTML = Object.keys(groups).sort().map((dev) => {
+  el.innerHTML = warn + Object.keys(groups).sort().map((dev) => {
     const items = groups[dev];
     const apps = Array.from(new Set(items.map((t) => t.app).filter(Boolean)))
       .map((a) => escapeHtml(a.split(".").pop() || a)).join(" / ");
@@ -409,17 +490,168 @@ function setSection(platform) {
     hint.innerHTML =
       '点开在右侧使用完整 DevTools（console / 断点 / network / storage）。<br>' +
       'iOS 需：Safari 打开页面，或 App 内打开 H5（App 需 <code>webView.isInspectable = true</code>，一般 Debug 包开启）。<br>' +
-      '注意：iOS 受系统限制无截图 / 录屏 / 点击能力，仅 Web 调试。';
+      'iOS 27+（系统已开放屏幕流服务）可点上方「屏幕镜像 + 点击滑动」实时看屏并触控；'
+      + 'iOS 26 及更早受系统限制镜像不可用（仅 Web 调试，与机型无关）。';
+    refreshMirrorEntry();   // 轮询/切设备时同步镜像入口状态（running / 启动中）
   } else {
     hint.innerHTML =
       '点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>' +
       '「新窗口」独立打开。<br>手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。';
   }
+  // 镜像入口只属于 iOS 真机分区：切回 Android 收起弹层并隐藏入口
+  const entry = $("mirrorEntry");
+  if (!isIos) {
+    if (entry) entry.hidden = true;
+    closeMirrorModal();
+  }
 }
 
+// ---------- iOS 屏幕镜像（pmd3 serve-web viewer：镜像 + 触摸控制一体） ----------
+// 启动走后端懒拉起 serve-web 子进程；前端 iframe 嵌入其 viewer（点画面 = 点击，
+// 拖动 = 滑动，页面自带 Home / 旋转 / 截屏 / 剪贴板）。设备未注册屏幕流服务
+// （displayservice，如部分 iOS 26 老机型）时后端 capability 探测会明确给出原因。
+let _mirrorTimer = null;      // 就绪轮询句柄
+let _mirrorBusy = false;      // 启动流程进行中
+
+function _mirrorSetState(text, cls) {
+  const s = $("mirrorState");
+  if (s) { s.textContent = text; s.className = "m-state" + (cls ? " " + cls : ""); }
+}
+function _mirrorMsg(html, isErr) {
+  const m = $("mirrorMsg");
+  m.hidden = !html;
+  m.innerHTML = html || "";
+  m.className = "mirror-msg" + (isErr ? " err" : "");
+}
+function _mirrorClearPoll() {
+  if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
+}
+async function _mirrorApi(method, path) {
+  const r = await fetch(apiUrlDev(path), fetchOpts({ method }));
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || data.error) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function mirrorOpenModal() { $("mirrorModal").hidden = false; }
+function closeMirrorModal() {
+  _mirrorClearPoll(); _mirrorBusy = false;
+  $("mirrorModal").hidden = true;
+  $("mirrorFrame").src = "about:blank";
+}
+async function refreshMirrorEntry() {
+  const entry = $("mirrorEntry");
+  const isIos = String(device || "").startsWith("ios");
+  if (!entry || !isIos) return;
+  const st = $("mirrorEntryState"), stopBtn = $("mirrorStop");
+  let s = null;
+  try {
+    s = await (await fetch(apiUrlDev("/api/ios/mirror/status"), fetchOpts())).json();
+  } catch (e) { /* 后端抖动忽略 */ }
+  if (!s || !s.tool) { entry.hidden = true; return; }   // 引擎缺失：不显示入口
+  entry.hidden = false;
+  if (s.running) {
+    st.textContent = "● 镜像运行中";
+    stopBtn.hidden = false;
+  } else {
+    stopBtn.hidden = true;
+    st.textContent = s.starting ? "启动中…" : (s.error ? "启动失败" : "");
+  }
+}
+async function mirrorStart() {
+  if (_mirrorBusy) return;
+  _mirrorBusy = true;
+  mirrorOpenModal();
+  _mirrorSetState("连接中…");
+  _mirrorMsg("", false);
+  $("mirrorFrame").src = "about:blank";
+  try {
+    await _mirrorApi("POST", "/api/ios/mirror/start");
+  } catch (e) {
+    _mirrorBusy = false;
+    _mirrorSetState("失败", "err");
+    _mirrorMsg(escapeHtml("启动请求失败：" + e.message), true);
+    return;
+  }
+  const began = Date.now();
+  const poll = async () => {
+    try {
+      const s = await (await fetch(apiUrlDev("/api/ios/mirror/status"), fetchOpts())).json();
+      if (s.capable === false) {
+        // 设备未注册屏幕流服务 → 明确告知 + 清理已起进程
+        _mirrorBusy = false;
+        _mirrorSetState("设备不支持", "err");
+        _mirrorMsg(escapeHtml(s.capability_hint || "设备未注册屏幕流服务（displayservice）")
+          + "（详细日志：<code>ios-mirror.log</code>）", true);
+        try { await _mirrorApi("POST", "/api/ios/mirror/stop"); } catch (e) {}
+        refreshMirrorEntry();
+        return;
+      }
+      if (s.capable === null) {
+        // 能力探测尚无结论：即使 HTTP 已就绪也不开 iframe（避免黑屏误判），
+        // 探测最长 ~30s 有界，等结论出来再定。
+        if (Date.now() - began > 100000) {
+          _mirrorBusy = false;
+          _mirrorSetState("超时", "err");
+          _mirrorMsg("等待镜像就绪超时（100s）。查看后端日志 <code>ios-mirror.log</code>；"
+            + "确认 iPhone 亮屏解锁、开发者模式已开启。", true);
+          return;
+        }
+        _mirrorSetState("探测屏幕能力…");
+        _mirrorTimer = setTimeout(poll, 1000);
+        return;
+      }
+      if (s.running) {
+        _mirrorBusy = false;
+        _mirrorSetState("已连接", "ok");
+        _mirrorMsg("", false);
+        $("mirrorFrame").src = s.url;   // viewer 自带触摸控制
+        refreshMirrorEntry();
+        return;
+      }
+      if (Date.now() - began > 100000) {
+        _mirrorBusy = false;
+        _mirrorSetState("超时", "err");
+        _mirrorMsg("等待镜像就绪超时（100s）。查看后端日志 <code>ios-mirror.log</code>；"
+          + "确认 iPhone 亮屏解锁、开发者模式已开启。", true);
+        return;
+      }
+      _mirrorSetState(s.starting ? "启动中…" : "就绪中…");
+      _mirrorTimer = setTimeout(poll, 1000);
+    } catch (e) {
+      _mirrorBusy = false;
+      _mirrorSetState("失败", "err");
+      _mirrorMsg(escapeHtml("状态查询失败：" + e.message), true);
+    }
+  };
+  poll();
+}
+async function mirrorStop() {
+  _mirrorClearPoll(); _mirrorBusy = false;
+  try { await _mirrorApi("POST", "/api/ios/mirror/stop"); } catch (e) {}
+  closeMirrorModal();
+  refreshMirrorEntry();
+}
+$("mirrorOpen").addEventListener("click", async () => {
+  // 已在运行 → 直接打开；否则走启动流程（幂等）
+  try {
+    const s = await (await fetch(apiUrlDev("/api/ios/mirror/status"), fetchOpts())).json();
+    if (s.running) {
+      mirrorOpenModal();
+      _mirrorSetState("已连接", "ok");
+      _mirrorMsg("", false);
+      $("mirrorFrame").src = s.url;
+    } else mirrorStart();
+  } catch (e) { mirrorStart(); }
+});
+$("mirrorStop").addEventListener("click", mirrorStop);
+$("mirrorStopModal").addEventListener("click", mirrorStop);
+$("mirrorClose").addEventListener("click", closeMirrorModal);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("mirrorModal") && !$("mirrorModal").hidden) closeMirrorModal();
+});
+
 // 依据 activeTargetId 同步左侧列表选中态（轮询重绘后保持高亮）
-function updateTargetActive() {
-  document.querySelectorAll(".target").forEach((el) => {
+function updateTargetActive() {  document.querySelectorAll(".target").forEach((el) => {
     el.classList.toggle("active", el.dataset.id === activeTargetId);
   });
 }
@@ -460,69 +692,167 @@ function openWindow(id) {
   window.open(devtoolsUrl(t), "_blank");
 }
 
-// 立即把设备按钮高亮切到指定 serial（纯 DOM 操作，不等后端）
+// 立即把设备按钮高亮切到指定 serial（纯 DOM 操作，不等后端）。
+// 同时把选中按钮移到首位：active 是悬浮面板锚点，hover 展开时它位置不漂移。
 function setActiveTab(serial) {
+  const box = $("deviceTabs");
+  let moved = null;
   document.querySelectorAll(".device-tab").forEach((b) => {
-    b.classList.toggle("active", b.dataset.serial === serial);
+    const on = b.dataset.serial === serial;
+    b.classList.toggle("active", on);
+    if (on) moved = b;
   });
+  if (moved) box.prepend(moved);
 }
 
-$("deviceTabs").addEventListener("click", (e) => {
-  const btn = e.target.closest(".device-tab");
-  if (!btn) return;
-  const next = btn.dataset.serial || null;
-  if (next === device) return;
-  device = next;
-  try { localStorage.setItem(LS_DEVICE, next || ""); } catch (err) {}
-  setActiveTab(next);  // 先切高亮，立即反馈
-  load(true);          // 切换设备：显示"加载中"并异步刷新
-});
+// 切换设备：高亮 + 持久化 + 刷新目标列表
+function switchDevice(serial) {
+  if (!serial || serial === device) return;
+  device = serial;
+  try { localStorage.setItem(LS_DEVICE, serial); } catch (err) {}
+  setActiveTab(serial);  // 先切高亮，立即反馈
+  load(true);            // 切换设备：显示"加载中"并异步刷新
+}
 
 loadDevices();
 load();
 setInterval(load, 5000);          // 目标列表每 5s 刷新（WebView 页面切换场景）
 setInterval(() => { try { loadDevices(); } catch (e) {} }, 8000);  // 设备 tab 周期刷新（iOS 桥懒启动后出现真设备）
 
-// ---------- header 自动收起：默认隐藏，鼠标移动到视口顶部即展开 ----------
+// ---------- 设备悬浮面板：常驻显示，可按住拖动，位置存 localStorage ----------
 (() => {
-  const header = document.getElementById("siteHeader");
-  const zone = document.getElementById("topZone");
-  let expandTimer = null, hideTimer = null;
+  const dock = document.getElementById("deviceDock");
+  if (!dock) return;
+  const LS_POS = "h5tool.deviceDock.pos";
+  let drag = null;
 
-  const expand = () => header.classList.remove("collapsed");
-  const collapse = () => header.classList.add("collapsed");
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-  // 悬停顶部热区并停留 200ms 再展开：快速滑过（如点 iframe 顶栏）不误触
-  zone.addEventListener("mouseenter", () => {
-    clearTimeout(hideTimer);
-    clearTimeout(expandTimer);
-    expandTimer = setTimeout(expand, 200);
+  // 当前位置（含 CSS transform 居中效果）
+  function rectPos() {
+    const r = dock.getBoundingClientRect();
+    return { x: r.left, y: r.top };
+  }
+
+  // 落位（像素定位，去掉 CSS 居中 transform）。左锚固定 → 展开只向右生长，active 不漂移。
+  function placePx(x, y) {
+    dock.style.transform = "none";
+    const maxX = window.innerWidth - dock.offsetWidth;
+    const maxY = window.innerHeight - dock.offsetHeight;
+    dock.style.left = clamp(x, 6, Math.max(6, maxX - 6)) + "px";
+    dock.style.top = clamp(y, 6, Math.max(6, maxY - 6)) + "px";
+  }
+
+  // 位置初始化状态：placed=true 表示已由记忆/拖动接管，不再自动重排
+  let placed = false;
+  const readMem = () => {
+    try { return JSON.parse(localStorage.getItem(LS_POS) || "null"); } catch (e) { return null; }
+  };
+
+  function restoreMem() {
+    const p = readMem();
+    if (p && isFinite(p.x) && isFinite(p.y)) { placePx(p.x, p.y); placed = true; }
+  }
+
+  // 设备渲染完成后调用：有记忆 → 恢复；无记忆且仍在 CSS 居中态 → 按真实宽度固化为像素居中。
+  // （必须在 dock 内容宽度就绪后调用，否则按"加载中"窄宽度居中会偏）
+  window.__dockEnsurePlaced = function ensurePlaced() {
+    if (placed) return;
+    restoreMem();
+    if (!placed && getComputedStyle(dock).transform !== "none") {
+      const cur = rectPos();
+      placePx(cur.x, cur.y);
+      placed = true;
+    }
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", restoreMem);
+  } else {
+    restoreMem();
+  }
+
+  // hover 展开时若面板放不下（dock 被拖到贴视口右缘/底部），临时平移让整块可见；
+  // 鼠标离开恢复拖动位置。选中胶囊是首元素，展开只向右下生长，位置本就不动。
+  let snapBack = null;
+  function maybePullIn() {
+    if (getComputedStyle(dock).transform !== "none") {
+      const cur = rectPos();
+      placePx(cur.x, cur.y);
+    }
+    const r = dock.getBoundingClientRect();
+    let dx = 0, dy = 0;
+    if (r.right > window.innerWidth - 10) dx = r.right - window.innerWidth + 10;
+    if (r.bottom > window.innerHeight - 10) dy = r.bottom - window.innerHeight + 10;
+    if (dx > 0 || dy > 0) {
+      if (snapBack === null) {
+        snapBack = { left: dock.style.left, top: dock.style.top };
+        dock.style.left = Math.max(6, r.left - dx) + "px";
+        dock.style.top = Math.max(6, r.top - dy) + "px";
+      }
+    }
+  }
+  let pullInTimer = null;
+  dock.addEventListener("mouseenter", () => {
+    clearTimeout(pullInTimer);
+    pullInTimer = setTimeout(maybePullIn, 260); // 等展开过渡完成再测宽，避免量到中间态
   });
-  zone.addEventListener("mouseleave", () => clearTimeout(expandTimer));
-
-  // 鼠标在 header 内保持展开；移出后 400ms 自动收起
-  header.addEventListener("mouseenter", () => {
-    clearTimeout(hideTimer);
-    clearTimeout(expandTimer);
-  });
-  header.addEventListener("mouseleave", () => {
-    hideTimer = setTimeout(collapse, 400);
-  });
-
-  // 兜底：鼠标贴到视口最顶部（≤2px）立即展开
-  document.addEventListener("mousemove", (e) => {
-    if (e.clientY <= 2) {
-      clearTimeout(expandTimer);
-      clearTimeout(hideTimer);
-      expand();
+  dock.addEventListener("mouseleave", () => {
+    clearTimeout(pullInTimer);
+    if (snapBack !== null) {
+      dock.style.left = snapBack.left;
+      dock.style.top = snapBack.top;
+      snapBack = null;
     }
   });
 
-  // 刚打开先展示 header 提示存在，随后自动收起
-  setTimeout(() => {
-    expand();
-    hideTimer = setTimeout(collapse, 2600);
-  }, 400);
+  // 拖动（Pointer Events，兼容鼠标/触控）。点击 tab 与拖动互不干扰：
+  // - pointerdown 只记录起点与被按下的设备 tab（不 preventDefault，保留原生行为）
+  // - 位移超过 3px 视为拖动，更新位置
+  // - pointerup：未拖动 → 若按下的是其他设备 tab 则切换设备；已拖动 → 保存新位置
+  dock.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    clearTimeout(pullInTimer);
+    snapBack = null;
+    const cur = rectPos();
+    if (getComputedStyle(dock).transform !== "none") placePx(cur.x, cur.y);
+    drag = {
+      px: e.clientX, py: e.clientY, x: cur.x, y: cur.y,
+      moved: false, tab: e.target.closest ? e.target.closest(".device-tab") : null,
+    };
+    dock.classList.add("dragging");
+    try { dock.setPointerCapture(e.pointerId); } catch (err) {}
+    // 不 preventDefault：否则浏览器不合成 click，会干扰后续交互（如 tab 需要 blur）
+  });
+
+  dock.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.px, dy = e.clientY - drag.py;
+    if (!drag.moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) drag.moved = true;
+    if (drag.moved) placePx(drag.x + dx, drag.y + dy);
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    dock.classList.remove("dragging");
+    try { dock.releasePointerCapture(e.pointerId); } catch (err) {}
+    const wasMoved = drag.moved;
+    const hitTab = drag.tab;
+    drag = null;
+    if (wasMoved) {
+      const pos = rectPos();
+      try { localStorage.setItem(LS_POS, JSON.stringify({ x: pos.x, y: pos.y })); } catch (err) {}
+    } else if (hitTab && !hitTab.classList.contains("active")) {
+      // 纯点击（未拖动）且点到的是其他设备 → 切换
+      switchDevice(hitTab.dataset.serial || null);
+    }
+  }
+  dock.addEventListener("pointerup", endDrag);
+  dock.addEventListener("pointercancel", (e) => {
+    if (!drag) return;
+    dock.classList.remove("dragging");
+    drag = null;
+  });
+  dock.addEventListener("dragstart", (e) => e.preventDefault());
 })();
 </script>
 

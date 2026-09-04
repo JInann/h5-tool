@@ -19,6 +19,7 @@
 | **12787** | 本服务 HTTP 控制台（`http://127.0.0.1:12787/`） |
 | **9222**  | 手机 WebView 的 CDP 调试端口（`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`，多设备按槽位偏移） |
 | **9322**  | iOS 桥端口（`pymobiledevice3 webinspector cdp` 子进程，每台真机一个实例按槽位偏移，env `H5TOOL_IOS_PORT` 可覆盖基端口；占用时启动会明确报错） |
+| **12790** | iOS 屏幕镜像端口（`pymobiledevice3 core-device display serve-web` 子进程，每台真机按槽位偏移，env `H5TOOL_IOS_MIRROR_PORT` 可覆盖基端口；不带鉴权，只 bind 127.0.0.1） |
 | **27183** | scrcpy 视频流（设备端 H.264 → 浏览器 WebCodecs，多设备按槽位偏移） |
 
 ### 核心文件
@@ -28,7 +29,7 @@
 | `server.py` | HTTP 服务 + 路由（/api/*、/devtools/、/cdp-ws/） |
 | `cdp.py` | 纯 Python CDP 客户端（WebSocket 握手 + Page.navigate / Runtime.evaluate） |
 | `scr_stream.py` | scrcpy 视频流（SPS/PPS 缓存、中断降级） |
-| `ios_bridge.py` | iOS 真机 CDP 桥（spawn `pymobiledevice3 webinspector cdp`，每台真机一个实例） |
+| `ios_bridge.py` | iOS 真机桥总管理：Web 调试桥（spawn `pymobiledevice3 webinspector cdp`，端口 9322+slot）+ 屏幕镜像桥（spawn `core-device display serve-web`，端口 12790+slot，含屏幕流能力探测） |
 | `web/` | 前端页面（index.html 控制台、devtools.html 调试入口） |
 | `devtools-local/front_end/` | devtools-frontend 构建产物（438MB，已 gitignore，可用远程替代） |
 | `bin/h5-tool.js` | npm CLI 入口（`start` / `status` / `stop`，负责探测 Python 并拉起 server.py） |
@@ -41,7 +42,7 @@
 | Python | >= 3.8 | **必需** | 运行服务（纯标准库，无需 pip 装包） |
 | adb | 任意 | **必需** | 手机控制/CDP/截图/镜像 |
 | Node.js | >= 18 | 可选 | 仅重建 devtools-frontend 产物时需要 |
-| pymobiledevice3 | >= 7.0（推荐最新） | **调试 iOS 真机时需要** | 跑 `webinspector cdp` 子命令做 WIR → CDP 翻译；`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`（Windows 另需安装 iTunes / Apple Devices 提供 usbmuxd 驱动；也可 `H5TOOL_PMD3` env 指定路径或 `uvx pymobiledevice3` 兜底）。注意：**仅支持真机，不支持 iOS 模拟器** |
+| pymobiledevice3 | >= 9.18；**屏幕镜像需 11.x + iOS 27+**（推荐最新） | **调试 iOS 真机时需要** | 跑 `webinspector cdp` 子命令做 WIR → CDP 翻译（Web 调试，各 iOS 版本均可）；`core-device display serve-web` 做屏幕镜像 + 触摸控制（**需 iOS 27+**：Apple 随 iOS 27 DeviceHub 才开放 displayservice，iOS 26 及更早实测不注册、与机型无关，工具会明确提示）；`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`（Windows 另需安装 iTunes / Apple Devices 提供 usbmuxd 驱动；也可 `H5TOOL_PMD3` env 指定路径或 `uvx pymobiledevice3` 兜底）。注意：**仅支持真机，不支持 iOS 模拟器** |
 | devtools 产物 | — | 可选 | WebView 调试面板；缺失不影响其余功能 |
 
 ---
@@ -137,6 +138,7 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 | `DEVTOOLS_DIR` | devtools 产物来源。**以 `http://`/`https://` 开头 = 远程反代模式**，否则当本地目录；不设置默认 `devtools-local/front_end/` | `DEVTOOLS_DIR=/data/front_end` 或 `DEVTOOLS_DIR=http://10.0.0.5:8080/devtools` |
 | `PYTHON` | 指定 python 解释器（bin/h5-tool.js 优先用它） | `PYTHON=/usr/bin/python3 h5-tool start` |
 | `H5TOOL_IOS_PORT` | iOS 桥基端口（多台真机按槽位偏移；默认 `9322`） | `H5TOOL_IOS_PORT=9399 h5-tool start` |
+| `H5TOOL_IOS_MIRROR_PORT` | iOS 屏幕镜像基端口（按槽位偏移；默认 `12790`） | `H5TOOL_IOS_MIRROR_PORT=12890 h5-tool start` |
 | `H5TOOL_PMD3` | 显式指定 `pymobiledevice3` 可执行路径；未设则按 `PATH pymobiledevice3 → uvx pymobiledevice3` 兜底探测 | `H5TOOL_PMD3=/opt/homebrew/bin/pymobiledevice3 h5-tool start` |
 
 远程模式下 h5-tool 自动从服务器拉取资源并缓存到 `devtools-local/.remote-cache/`，
@@ -169,6 +171,9 @@ curl -s http://127.0.0.1:12787/api/webview-targets
 | 控制台右上角 WebView 红灯，`webview_error: 未找到 WebView` | App 未开启 `WebView.setWebContentsDebuggingEnabled(true)`；或当前没打开 H5 页面 | 让客户端开调试开关（仅测试包）；先打开 H5 页面再刷新 |
 | `webview_error: 未检测到已连接的设备` | adb devices 为空 | 见安装阶段 adb 条目 |
 | iOS 调试区显示「端口 9322 已被其它进程占用」 | 上一次 iOS 桥进程没正常退出（强杀 server、TaskStop 等走不到 atexit） | `lsof -ti tcp:9322 \| xargs kill -9` 后刷新页面，重新点 iOS 真机 tab 即可（懒启动重拉桥） |
+| iOS 镜像提示「设备未注册屏幕流服务（displayservice）」 | **系统版本限制**：displayservice 需 iOS 27+（Apple 随 iOS 27 DeviceHub 才开放；实测 iPhone 11 / 14 Pro Max 的 iOS 26.5 均不注册，与机型无关） | 升级 iPhone 到 iOS 27 后重试；Web 调试不受影响。次要前提：开发者模式已开启 + 设备解锁亮屏 |
+| iOS 镜像 viewer 打开黑屏 / 一直转圈 | serve-web HTTP 已起但设备端媒体流未建立（多为 iOS 26 及更早无 displayservice，见上条；Windows Chrome/Edge 缺 HEVC 解码也会黑屏） | 看 `~/.h5-tool/logs/ios-mirror.log` 是否有 `No such service: ...displayservice`；Windows 装「HEVC 视频扩展」（Chrome/Edge）或改用 Safari |
+| 强杀后端后 `lsof -ti tcp:12790` 有残留 serve-web | SIGKILL/TaskStop 走不到 atexit | `lsof -ti tcp:12790 \| xargs kill -9`（或换基端口重启） |
 | 执行 JS 报 `CDP 命令超时` | WebView 刚重建 / 页面在跳转 | 自动重连一次后仍失败就等 1-2s 重试；页面导航后 target 会变 |
 | `Runtime.evaluate` 结果不符预期 | 页面上下文限制 | 确认表达式在页面上下文（非 iframe）；可先 `location.href` 验证 |
 

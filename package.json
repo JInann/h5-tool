@@ -1,6 +1,6 @@
 {
   "name": "@fkjs/h5-tool",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Android/iOS WebView H5 调试小工具后端 —— npx 一键启动（ADB + CDP + scrcpy + pymobiledevice3，纯 Python 标准库）",
   "keywords": [
     "h5",

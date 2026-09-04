@@ -1,8 +1,9 @@
 # h5-tool 集成 iOS WebView 调试（基于 pymobiledevice3）方案与开发计划
 
-> 状态：**已上线 0.3.0**（2026-09-03 P5 完成：iOS 桥从 inspect-webkit 切换到 pymobiledevice3；真机 iPhone 11 iOS 26.5 全链路验证通过：懒启动 → 目标列表 → /cdp-ws 代理 Runtime.evaluate 1+1=2 → 真机页面执行）。
-> 范围：一期只做 **iOS Web 调试**（目标列表 + 内嵌完整 DevTools），不做 iOS 截图/点击/镜像（iOS 协议限制，见「能力边界」）。
-> 原则：**Android 与 iOS 共用同一套 API（/api/webview-targets），只在返回结果里区分平台；devtools.html 一套 UI 同时兼容两种设备。**
+> 状态：**Web 调试已上线 0.3.0**（2026-09-03 P5 完成：iOS 桥从 inspect-webkit 切换到 pymobiledevice3；真机 iPhone 11 iOS 26.5 全链路验证通过：懒启动 → 目标列表 → /cdp-ws 代理 Runtime.evaluate 1+1=2 → 真机页面执行）。
+> **屏幕镜像 + 触控（二期，2026-09-04）**：基于 pmd3 `core-device display serve-web`（viewer 自带触摸控制），devtools.html iOS 分区新增「屏幕镜像 + 点击滑动」入口，iframe 嵌入 viewer；`ios_bridge.py` 统一管理（镜像桥端口 12790+slot，含 displayservice 能力探测）。**边界**：displayservice 需 **iOS 27+**（Apple 随 iOS 27 DeviceHub 开放；实测 iPhone 11 26.5 与 iPhone 14 Pro Max 26.5.2 的 RSD 均不注册该服务，**与机型无关**——换机无用，升级系统才解锁）；pmd3 需 ≥9.18（本机 11.3.1）；Windows 浏览器需 HEVC 解码。
+> 范围：iOS Web 调试（目标列表 + 内嵌完整 DevTools）+ 屏幕镜像/触控（设备能力支持时）。
+> 原则：**Android 与 iOS 共用同一套 API（/api/webview-targets、/api/ios/mirror/*），只在返回结果里区分平台；devtools.html 一套 UI 同时兼容两种设备。**
 
 ---
 
