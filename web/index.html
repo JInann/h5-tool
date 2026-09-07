@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>H5 小工具控制台</title>
+<html lang="zh-CN" data-page-node-id="fbeATG2g7adw7YnaggZ1M4">
+<head data-page-node-id="LfNDvTNcPG7vYa39CwzjsV">
+<meta charset="utf-8" data-page-node-id="kgLMntgUffriA8wrHHFovl">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="Rz3rXcLRz5EiQy7zi6T29Y">
+<title>H5 小工具 · WebView 调试</title>
 <style>
   :root {
     --bg: #0f1117; --panel: #1a1d27; --panel2: #232734; --border: #2e3342;
@@ -16,123 +16,206 @@
     background: var(--bg); color: var(--text);
     height: 100vh; display: flex; flex-direction: column; overflow: hidden;
   }
-  header {
-    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 10;
-    flex-shrink: 0;
-  }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  .status { display: flex; gap: 14px; margin-left: auto; font-size: 12px; color: var(--muted); align-items: center; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; background: var(--muted); }
-  .dot.on { background: var(--ok); } .dot.off { background: var(--err); }
-  /* 设备切换按钮组（平铺，点击切换） */
-  .device-tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; max-width: 420px; }
-  .device-tab {
-    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 7px; padding: 4px 12px; font: inherit; font-size: 12.5px;
-    cursor: pointer; white-space: nowrap; transition: all .15s;
-  }
-  .device-tab:hover { border-color: var(--accent); color: var(--accent); }
-  .device-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .device-tab .sub { opacity: .72; font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
-  .device-tab.active .sub { opacity: .85; }
-  .tab-empty { color: var(--muted); font-size: 12px; }
-  .layout {
-    flex: 1; min-height: 0;
-    display: grid; grid-template-columns: 620px 1fr; gap: 16px; padding: 16px;
-    overflow: hidden;
-  }
-  /* 左列独立滚动，右列（实时镜像）固定不随左列滚动；隐藏滚动条但保留滚动 */
-  .col-left {
-    overflow-y: auto; min-height: 0; padding-right: 6px;
-    scrollbar-width: none; -ms-overflow-style: none;
-  }
-  .col-left::-webkit-scrollbar { display: none; }
-  .col-right { margin-bottom: 0; min-height: 0; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
-  .col-right::-webkit-scrollbar { display: none; }
-  @media (max-width: 900px) {
-    body { height: auto; overflow: auto; }
-    .layout { display: block; height: auto; overflow: visible; }
-    .col-left, .col-right { height: auto; overflow: visible; padding-right: 0; margin-bottom: 0; }
-    .col-right { margin-bottom: 16px; }
-  }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
-  .card h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
-  /* 卡片折叠展开 */
-  .card-title {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    cursor: pointer; user-select: none; margin: 0 0 10px;
-  }
-  .card-title::after {
-    content: "▾"; font-size: 11px; color: var(--muted);
-    transition: transform .18s ease; flex-shrink: 0;
-  }
-  .card.collapsed .card-title { margin-bottom: 0; }
-  .card.collapsed .card-title::after { transform: rotate(-90deg); }
-  .card.collapsed .card-body { display: none; }
-  input, textarea {
-    width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 7px; padding: 9px 11px; font: inherit; outline: none;
-  }
-  input:focus, textarea:focus { border-color: var(--accent); }
-  textarea { resize: vertical; min-height: 92px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
-  .row { display: flex; gap: 8px; }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
   button {
-    background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 9px 15px;
-    font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .15s;
+    background: var(--accent); color: #fff; border: none; border-radius: 7px;
+    padding: 7px 13px; font: inherit; font-weight: 500; cursor: pointer;
   }
   button:hover { background: var(--accent2); }
-  button:disabled { opacity: .45; cursor: not-allowed; }
   button.ghost { background: var(--panel2); border: 1px solid var(--border); }
   button.ghost:hover { background: var(--border); }
-  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
-  .url-row { display: flex; gap: 8px; margin-bottom: 8px; }
-  .url-row .url-input { flex: 1; min-width: 0; }
-  .url-row .btn-del { padding: 9px 11px; color: var(--muted); }
-  .url-row .btn-del:hover { color: var(--err); border-color: var(--err); }
-  .port-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-  .port-btn { font-variant-numeric: tabular-nums; min-width: 68px; }
-  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
-  pre.out {
-    background: #0b0d13; border: 1px solid var(--border); border-radius: 7px; padding: 11px;
-    margin: 10px 0 0; font-size: 12.5px; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto;
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input, textarea {
+    width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 7px 10px; font: inherit; font-size: 12px; outline: none;
   }
+  input:focus, textarea:focus { border-color: var(--accent); }
+
+  /* ===== 设备悬浮面板（可拖动，切设备） ===== */
+  .dock {
+    position: fixed; top: 14px; left: 50%; z-index: 60;
+    transform: translateX(-50%);
+    padding: 6px; border-radius: 14px;
+    background: rgba(26, 29, 39, .88);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+    cursor: grab; user-select: none; -webkit-user-select: none;
+    touch-action: none;
+  }
+  .dock.dragging { cursor: grabbing; }
+
+  .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 400px 1fr; gap: 0; }
+  .panel { overflow-y: auto; padding: 14px; border-right: 1px solid var(--border); }
+  .adb-banner {
+    background: rgba(255, 92, 108, .10); border: 1px solid var(--err);
+    color: var(--err); font-size: 12.5px; line-height: 1.65;
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;
+  }
+  .adb-banner code { background: rgba(255, 92, 108, .15); color: var(--err); }
+  .section { margin-bottom: 18px; }
+  .section h2 {
+    font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+    margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.on { background: var(--ok); }
+  .device-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 0; max-width: min(600px, calc(100vw - 24px)); }
+  .device-tab {
+    background: rgba(255, 255, 255, .7); border: 1px solid rgba(255, 255, 255, .85); color: #10151f;
+    border-radius: 999px; padding: 4px 13px; font: inherit; font-size: 12.5px;
+    cursor: pointer; white-space: nowrap; transition: background .15s, opacity .18s, transform .18s, padding .18s;
+  }
+  .device-tab:hover { background: rgba(255, 255, 255, .88); }
+  .device-tab.active {
+    background: var(--ok); border-color: var(--ok); color: #05301b; font-weight: 600;
+    box-shadow: 0 2px 10px rgba(62, 207, 142, .35);
+  }
+  .device-tab.active:hover { background: var(--ok); }
+  .device-tab .sub { opacity: .75; font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .device-tab.active .sub { opacity: .9; }
+  .device-tab:not(.active) {
+    width: 0; padding: 4px 0; border-width: 1px 0; opacity: 0; transform: scale(.78);
+    overflow: hidden;
+  }
+  .dock:hover .device-tab:not(.active),
+  .dock:focus-within .device-tab:not(.active) {
+    width: auto; padding: 4px 13px; border-width: 1px; opacity: 1; transform: scale(1);
+  }
+  .dock:hover .device-tabs, .dock:focus-within .device-tabs { gap: 6px; }
+  .tab-empty { color: var(--muted); font-size: 12px; }
+  .target {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px;
+    cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s;
+  }
+  .target:hover { border-color: var(--accent2); }
+  .target.active {
+    border-color: var(--accent);
+    background: rgba(76, 141, 255, .10);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .target.active .t-title { color: var(--accent); }
+  .target.active .badge { border-color: var(--accent); color: var(--accent); }
+  .t-title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .badge {
+    font-size: 11px; padding: 1px 7px; border-radius: 20px;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--muted); flex-shrink: 0;
+  }
+  .t-url {
+    font-size: 12px; color: var(--muted); word-break: break-all; margin: 5px 0 8px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .ops { display: flex; gap: 8px; }
+  .err { font-size: 12px; color: var(--err); }
+  .empty { font-size: 12px; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 4px; }
+  .ios-warn {
+    font-size: 12px; line-height: 1.6; color: #d9a441;
+    background: rgba(217, 164, 65, .08); border: 1px solid rgba(217, 164, 65, .35);
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; word-break: break-all;
+  }
+  .dev-group {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+    margin: 14px 0 8px; padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .dev-group:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+  .dev-group .dg-id { color: var(--text); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .dev-group .dg-app { color: var(--accent2); font-weight: 400; }
+  .dev-group .dg-cnt { margin-left: auto; font-weight: 400; font-size: 11px; }
+  .quick-nav {
+    position: sticky; bottom: 0; z-index: 5;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    margin: 16px -14px 0; padding: 10px 14px 4px;
+  }
+  .quick-nav h2 {
+    font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+    margin: 0 0 8px; font-weight: 600;
+  }
+  .qn-row { display: flex; gap: 8px; }
+  .qn-row input { flex: 1; min-width: 0; }
+  .qn-row button { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
+  .quick-nav .msg { font-size: 11px; margin-top: 6px; min-height: 14px; color: var(--muted); }
+  .quick-nav .msg.ok { color: var(--ok); }
+  .quick-nav .msg.err { color: var(--err); }
+  #view { display: flex; flex-direction: column; min-height: 0; }
+  iframe { flex: 1; width: 100%; border: none; background: #fff; }
+
+  /* ===== 悬浮功能按钮（各自独立拖动，默认左下角竖向排列） ===== */
+  .fab {
+    position: fixed; z-index: 90;
+    width: 46px; height: 46px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; line-height: 1; cursor: pointer;
+    background: rgba(26, 29, 39, .92); border: 1px solid var(--border); color: var(--text);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .32);
+    user-select: none; -webkit-user-select: none; touch-action: none;
+    transition: transform .12s, border-color .12s;
+  }
+  .fab:hover { border-color: var(--accent); transform: scale(1.06); }
+  .fab.dragging { cursor: grabbing; transition: none; }
+  .fab.fab-hidden { display: none; }
+  .fab .fab-badge {
+    position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
+    border-radius: 8px; background: var(--err); color: #fff; font-size: 10px;
+    display: none; align-items: center; justify-content: center; padding: 0 4px;
+  }
+  .fab .fab-badge.show { display: flex; }
+
+  /* ===== 通用弹窗（可拖动 + 可缩放） ===== */
+  .mod-modal {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 95;
+  }
+  .mod-modal[hidden] { display: none; }
+  .mod-card {
+    position: fixed;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .4);
+    min-width: 280px; min-height: 180px;
+  }
+  .mod-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 13px;
+    cursor: move; user-select: none; -webkit-user-select: none; flex-shrink: 0;
+    background: var(--panel);
+  }
+  .mod-bar .mod-title { font-weight: 600; }
+  .mod-bar .mod-grow { flex: 1; }
+  .mod-bar button.mod-close {
+    background: transparent; border: none; color: var(--muted); padding: 2px 6px; font-size: 15px;
+    flex-shrink: 0; cursor: pointer; border-radius: 5px;
+  }
+  .mod-bar button.mod-close:hover { background: var(--border); color: var(--text); }
+  .mod-body { flex: 1; min-height: 0; padding: 12px 14px; overflow: auto; display: flex; flex-direction: column; }
+  .mod-resize {
+    position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
+    cursor: nwse-resize; z-index: 5;
+  }
+  .mod-resize::after {
+    content: ""; position: absolute; right: 4px; bottom: 4px;
+    width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  }
+
+  /* 弹窗默认尺寸 */
+  #modClip .mod-card { width: 440px; height: 520px; }
+  #modFile .mod-card { width: 440px; height: 460px; }
+  #modApk .mod-card { width: 440px; height: 460px; }
+  #modMirror .mod-card { width: 540px; height: 720px; }
+  #modPort .mod-card { width: 360px; height: 340px; }
+  #modClaude .mod-card { width: 440px; height: 470px; }
+  #modCfg .mod-card { width: 480px; height: 600px; }
+
+  /* ===== 模块内容通用 ===== */
   .msg { font-size: 12px; margin-top: 8px; min-height: 16px; }
   .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
-  .wv-hint { color: var(--warn); }
-  /* 屏幕镜像 */
-  #screenWrap { display: flex; flex-direction: column; align-items: center; }
-  #screenFrame {
-    position: relative; background: #000; border-radius: 14px; overflow: hidden;
-    border: 1px solid var(--border); line-height: 0; max-width: 100%;
-  }
-  #screen { display: block; max-height: calc(100vh - 260px); max-width: 100%; cursor: crosshair; }
-  #tapMark {
-    position: absolute; width: 26px; height: 26px; border: 2px solid var(--accent);
-    border-radius: 50%; margin: -13px 0 0 -13px; pointer-events: none; opacity: 0;
-    transition: opacity .1s; box-shadow: 0 0 12px var(--accent);
-  }
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; align-items: center; justify-content: center; }
-  .fps { font-size: 12px; color: var(--muted); }
-  .screen-empty { color: var(--muted); font-size: 13px; line-height: 1.7; padding: 60px 20px; text-align: center; }
-  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--panel2); border: 1px solid var(--border); }
-  /* Claude 节点延迟测试 */
-  .claude-now { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-  .claude-rate { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .claude-rate.ok { color: var(--ok); }
-  .claude-rate.warn { color: var(--warn); }
-  .claude-rate.err { color: var(--err); }
-  .claude-rate.run { color: var(--accent); }
-  .claude-proxy { font-size: 12px; color: var(--muted); word-break: break-all; }
-  .claude-metrics { font-size: 12.5px; color: var(--text); margin-top: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-  .claude-metrics b { color: var(--muted); font-weight: 500; }
-  .claude-hist { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-  .hist-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; padding: 6px 9px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; }
-  .hist-item .hv { font-variant-numeric: tabular-nums; }
-  .hist-item .ht { color: var(--muted); }
-  .hist-item .hd { cursor: pointer; color: var(--muted); padding: 0 2px; }
-  .hist-item .hd:hover { color: var(--err); }
-  /* 剪贴板互通 */
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; min-width: 0; }
+
+  /* 剪贴板 */
   .clip-hist { margin-top: 8px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
   .clip-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 9px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; }
   .clip-item .dir { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); }
@@ -141,7 +224,8 @@
   .clip-item .content { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); cursor: default; }
   .clip-item .time { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .clip-item .btn-copy { flex: none; padding: 2px 9px; font-size: 11px; }
-  /* 文件推送 / APK 安装 */
+
+  /* 文件推送 / APK */
   .drop-zone {
     border: 1.5px dashed var(--border); border-radius: 10px; padding: 22px 14px;
     text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
@@ -160,182 +244,1689 @@
   .transfer-item .tf-prog { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .transfer-bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 4px; }
   .transfer-bar > div { height: 100%; background: var(--accent); width: 0%; transition: width .15s; }
-  /* 后端连接（前后端分离模式） */
-  #connBanner {
-    display: flex; align-items: center; justify-content: center; gap: 12px;
-    background: var(--warn); color: #241a05; font-size: 13px; padding: 7px 16px;
-    flex-shrink: 0; z-index: 20;
+
+  /* 释放端口 */
+  .port-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .port-btn { font-variant-numeric: tabular-nums; min-width: 68px; }
+
+  /* Claude 延迟 */
+  .claude-now { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .claude-rate { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .claude-rate.ok { color: var(--ok); }
+  .claude-rate.warn { color: var(--warn); }
+  .claude-rate.err { color: var(--err); }
+  .claude-rate.run { color: var(--accent); }
+  .claude-proxy { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .claude-metrics { font-size: 12.5px; color: var(--text); margin-top: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .claude-metrics b { color: var(--muted); font-weight: 500; }
+  .claude-hist { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .hist-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; padding: 6px 9px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; }
+  .hist-item .hv { font-variant-numeric: tabular-nums; }
+  .hist-item .ht { color: var(--muted); }
+  .hist-item .hd { cursor: pointer; color: var(--muted); padding: 0 2px; }
+  .hist-item .hd:hover { color: var(--err); }
+
+  /* 屏幕镜像（Android + iOS 统一） */
+  .mirror-platform { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-shrink: 0; }
+  .mirror-platform .mp-label { font-size: 12px; color: var(--muted); }
+  .mirror-platform .mp-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); }
+  .mirror-platform .mp-tag.android { color: var(--ok); border-color: var(--ok); }
+  .mirror-platform .mp-tag.ios { color: var(--accent); border-color: var(--accent); }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+  .toolbar button { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
+  .fps { font-size: 12px; color: var(--muted); }
+  #screenWrap { display: flex; flex-direction: column; align-items: center; flex: 1; min-height: 0; }
+  #screenFrame {
+    position: relative; background: #000; border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border); line-height: 0; max-width: 100%;
   }
-  #connBanner[hidden] { display: none; }
-  #connBanner button { background: #241a05; color: #fff; padding: 4px 10px; }
-  /* adb 未安装红色警示 */
-  #adbBanner {
-    display: flex; align-items: center; justify-content: center; gap: 12px;
-    background: var(--err); color: #fff; font-size: 13px; padding: 7px 16px;
-    flex-shrink: 0; z-index: 20; text-align: center;
+  #screen { display: block; max-height: 460px; max-width: 100%; cursor: crosshair; }
+  #scrcpyCanvas { display: block; max-height: 460px; max-width: 100%; cursor: crosshair; background: #000; }
+  #tapMark {
+    position: absolute; width: 26px; height: 26px; border: 2px solid var(--accent);
+    border-radius: 50%; margin: -13px 0 0 -13px; pointer-events: none; opacity: 0;
+    transition: opacity .1s; box-shadow: 0 0 12px var(--accent);
   }
-  #adbBanner[hidden] { display: none; }
-  #adbBanner code { background: rgba(255,255,255,.2); color: #fff; padding: 1px 6px; border-radius: 4px; }
-  .conn-modal {
-    position: fixed; inset: 0; background: rgba(0,0,0,.55);
-    display: flex; align-items: center; justify-content: center; z-index: 100;
+  .screen-empty { color: var(--muted); font-size: 13px; line-height: 1.7; padding: 40px 16px; text-align: center; }
+  /* iOS 镜像分支 */
+  .mirror-ios-row { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .mirror-ios-row button { padding: 7px 13px; }
+  .mirror-ios-row .m-state { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mirror-ios-row .m-state.ok { color: var(--ok); }
+  .mirror-ios-row .m-state.err { color: var(--err); }
+  .mirror-msg {
+    margin: 8px 0; padding: 7px 10px; font-size: 12px; color: var(--warn); line-height: 1.6;
+    background: rgba(255,180,84,.08); border: 1px solid rgba(255,180,84,.35); border-radius: 8px;
   }
-  .conn-modal[hidden] { display: none; }
-  .conn-card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 18px 20px; width: 440px; max-width: calc(100vw - 40px);
+  .mirror-msg.err { color: var(--err); background: rgba(255,92,108,.08); border-color: rgba(255,92,108,.35); }
+  .mirror-msg[hidden] { display: none; }
+  .mirror-ios-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .mirror-ios-frame iframe { flex: 1; width: 100%; border: none; background: #000; border-radius: 8px; }
+  .mirror-tip { margin-top: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.6; flex-shrink: 0; }
+
+  /* 控制面板 */
+  .cfg-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .cfg-field label { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+  .cfg-field .cfg-tip { font-size: 11.5px; color: var(--muted); line-height: 1.65; }
+  .cfg-field .cfg-tip code { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 11px; word-break: break-all; }
+  .cfg-row { display: flex; gap: 8px; }
+  .cfg-row button { padding: 6px 14px; font-size: 12px; border-radius: 6px; }
+  .cfg-row button.ghost { padding: 6px 12px; }
+  .cfg-msg { font-size: 12px; min-height: 16px; line-height: 1.5; }
+  .cfg-msg.ok { color: var(--ok); }
+  .cfg-msg.err { color: var(--err); }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; }
+  .toggle-row + .toggle-row { margin-top: 6px; }
+  .toggle-row .tg-label { font-size: 13px; }
+  .toggle {
+    position: relative; width: 36px; height: 20px; flex-shrink: 0; cursor: pointer;
   }
-  .conn-card h3 { margin: 0 0 8px; font-size: 15px; }
+  .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .toggle .slider {
+    position: absolute; inset: 0; background: var(--border); border-radius: 20px; transition: background .18s;
+  }
+  .toggle .slider::before {
+    content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px;
+    background: #fff; border-radius: 50%; transition: transform .18s;
+  }
+  .toggle input:checked + .slider { background: var(--accent); }
+  .toggle input:checked + .slider::before { transform: translateX(16px); }
 </style>
 </head>
-<body>
-<header>
-  <h1>📱 H5 小工具控制台</h1>
-  <div class="status">
-    <div class="device-tabs" id="deviceTabs" title="点击切换要操作的设备"><span class="tab-empty">检测中…</span></div>
-    <span><span class="dot" id="dotDevice"></span><span id="deviceLabel">检测中…</span></span>
-    <span><span class="dot" id="dotWebview"></span>WebView</span>
-    <a href="/devtools.html" style="color:var(--accent);text-decoration:none;font-size:13px;white-space:nowrap;">🛠 调试</a>
-    <button class="ghost" id="btnConn" style="padding:5px 11px;" title="后端连接设置">⚙ 后端</button>
-    <button class="ghost" id="btnRefresh" style="padding:5px 11px;">刷新状态</button>
-  </div>
-</header>
-
-<div id="connBanner" hidden>
-  <span>⚠ 后端未连接（<span id="connBannerUrl"></span>），请确认电脑上已启动 h5-tool 后端</span>
-  <button id="btnBannerConn">⚙ 设置</button>
+<body data-page-node-id="v8K18KpvRPOqVLR9ApriBV">
+<div class="dock" id="deviceDock" title="拖动位置 · 移入展开全部设备" data-page-node-id="bka8p2vINR1A9OZUVjMtE5">
+  <div class="device-tabs" id="deviceTabs" data-page-node-id="N5yy1XI41ZZz1fwazKsBi7"><span class="tab-empty" data-page-node-id="HiqaEhHfC5azZ2L6aSAKzD">加载中…</span></div>
 </div>
-
-<div id="adbBanner" hidden>
-  <span>⚠ 未检测到 adb（Android 调试桥），截图 / 点击 / WebView 调试 / 剪贴板互通均不可用。macOS 安装 <code>brew install android-platform-tools</code>，装好后点「刷新状态」。</span>
-</div>
-
-<div class="layout">
-  <!-- 左列：功能 -->
-  <div class="col-left">
-    <div class="card" id="card-1">
-      <h2 class="card-title">1 · 发送链接到手机</h2>
-      <div class="card-body">
-        <div id="urlRows"></div>
-        <button class="ghost" id="btnAddRow" style="width:100%;">＋ 新增一行</button>
-        <div class="hint">每行可独立发送（回车也行）；输入内容与发送过的历史会自动保存，下次打开仍在。<br>链接里写 <code>{ip}</code> 会自动替换为本机实际 IP，例如 <code>http://{ip}:5173/GuardTeam.html</code>。<br><span id="wvHint" class="wv-hint" hidden>⚠ 当前设备未开 WebView（无 H5 页面），导航/JS 不可用，截图/点击/镜像不受影响。</span></div>
-        <div class="msg" id="navMsg"></div>
-        <datalist id="urlHistory"></datalist>
-      </div>
+<div class="layout" data-page-node-id="uVUKy1vwvB3zLlmIgXXwjK">
+  <div class="panel" data-page-node-id="VAa6pBfuyrVNX6XY7mct1F">
+    <div class="adb-banner" id="adbBanner" hidden data-page-node-id="1DxDjCEIi1vk9B2rYTuR6B">
+      ⚠ 未检测到 adb（Android 调试桥），截图 / 点击 / WebView 调试等功能不可用。
+      macOS 安装 <code data-page-node-id="Cz9Xkjfkvn5DHv3PqiENhQ">brew install android-platform-tools</code>，装好后刷新页面。
     </div>
-
-    <div class="card" id="card-clip">
-      <h2 class="card-title">2 · 剪贴板互通 <span class="badge" id="clipBadge">-</span></h2>
-      <div class="card-body">
-        <div class="row" id="clipStatusRow">
-          <span id="clipStatus">检测中…</span>
-          <button class="ghost" id="btnClipInstall" hidden>安装到手机</button>
-        </div>
-        <div class="clip-hist" id="clipHist"><div class="hint" style="text-align:center;">暂无同步记录</div></div>
-        <div class="hint">自动双向同步（仅文本）：手机复制 → 自动写入 Mac，Mac 复制 → 自动写入手机（每 2 秒检测，手机需亮屏解锁）。基于 <a href="https://github.com/polygraphene/adb-clip" target="_blank" style="color:var(--accent);">adb-clip</a>，免装 App。</div>
-        <div class="msg" id="clipMsg"></div>
-      </div>
+    <div class="section" data-page-node-id="wmxaUavmzZkEc2Yw56IjDp">
+      <h2 id="secTitle" data-page-node-id="MMmgAAlvx8sbgf7EdBwEIG"><span class="dot" id="dotPhone" data-page-node-id="FoX3kluxJjBtcFU02vSUST"></span>手机 WebView</h2>
+      <div id="phoneList" data-page-node-id="aT2CBMxj6J76bsgfXahGoi"></div>
     </div>
-
-    <div class="card" id="card-filepush">
-      <h2 class="card-title">3 · 文件推送 <span class="badge">电脑 → 手机</span></h2>
-      <div class="card-body">
-        <div class="drop-zone" id="fileDrop">
-          <div class="dz-icon">📁</div>
-          <div class="dz-text">拖拽文件到这里，或点击选择</div>
-          <div class="dz-sub">推送到手机 <code>/sdcard/Download/h5-tool/</code></div>
-          <input type="file" id="fileInput" multiple hidden />
-        </div>
-        <div class="msg" id="fileMsg"></div>
-        <div class="transfer-list" id="fileList"></div>
-      </div>
+    <div class="hint" id="secHint" data-page-node-id="Hu9wgBbQF6YsY9KZCGUYFJ">
+      点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br data-page-node-id="I687epFZJkOSAqcjj7pvmy">
+      「新窗口」独立打开。<br data-page-node-id="99l5GhwK8CcFtPPGXwSU7P">
+      手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。
     </div>
-
-    <div class="card" id="card-apk">
-      <h2 class="card-title">4 · APK 安装 <span class="badge">电脑 → 手机</span></h2>
-      <div class="card-body">
-        <div class="drop-zone" id="apkDrop">
-          <div class="dz-icon">📦</div>
-          <div class="dz-text">拖拽 APK 到这里，或点击选择</div>
-          <div class="dz-sub">上传后自动 <code>adb install -r</code> 安装到手机</div>
-          <input type="file" id="apkInput" accept=".apk" hidden />
-        </div>
-        <div class="msg" id="apkMsg"></div>
-        <div class="transfer-list" id="apkList"></div>
+    <div class="quick-nav" data-page-node-id="SrBx1QbnZa3Kmgguj9sKib">
+      <h2 data-page-node-id="j5rletcf1ZD1Jw8R8TI4jz">快捷修改地址</h2>
+      <div class="qn-row" data-page-node-id="eQB63IFnwZhHsVCzXNckzY">
+        <input id="qnInput" list="qnHistory" placeholder="http://{ip}:5173/xx.html  或 https://example.com" data-page-node-id="nTeYYLHkyryltI5Gmmbihn" />
+        <button id="qnSend" data-page-node-id="Y1hHxHbgosENwcNxGX1iwb">发送</button>
       </div>
+      <div class="msg" id="qnMsg" data-page-node-id="WsCmCgvgx7HlTgdfV6iIjW"></div>
+      <datalist id="qnHistory" data-page-node-id="sC3eNrDjb8px7CZ7nZYfkE"></datalist>
     </div>
-
-    <div class="card" id="card-3">
-      <h2 class="card-title">5 · 释放端口</h2>
-      <div class="card-body">
-        <div class="port-grid" id="portGrid"></div>
-        <div class="row" style="margin-top:10px;">
-          <input id="portCustom" type="number" min="1" max="65535" placeholder="自定义端口，如 3000" />
-          <button id="btnKillCustom">释放</button>
-        </div>
-        <div class="hint">点击即杀掉占用该端口的进程（<code>lsof</code> + <code>kill -9</code>）；本工具自身端口受保护。</div>
-        <div class="msg" id="portMsg"></div>
-      </div>
-    </div>
-
-    <div class="card" id="card-5">
-      <h2 class="card-title">6 · Claude 节点延迟测试</h2>
-      <div class="card-body">
-        <div class="row">
-          <button id="btnClaudeTest">测一下</button>
-          <button class="ghost" id="btnClaudeClear">清空记录</button>
-        </div>
-        <div class="claude-now">
-          <span class="claude-rate" id="claudeRate">—</span>
-          <span id="claudeProxy" class="claude-proxy"></span>
-        </div>
-        <div class="claude-metrics" id="claudeMetrics"></div>
-        <div class="hint">测当前出口节点到 <code>api.anthropic.com</code> 的延迟：TCP 直连 + HTTPS 经代理往返（无需 API Key）。切换节点后点「测一下」即可对比；若新节点只在交互 shell 里设了代理，需重启 h5-tool 后端生效（<code>h5-tool restart</code> 或 Ctrl+C 后重新 start）。</div>
-        <div class="claude-hist" id="claudeHist"></div>
-      </div>
-    </div>
-
+    <div class="hint" style="padding:0 0 80px;" data-page-node-id="IPmwfVmtQLXjwLSHzd9uhT">回车发送；<code data-page-node-id="0GylAgivieADrJi4hwPxIC">{ip}</code> 自动替换为本机 IP，输入与发送历史自动保存。</div>
   </div>
-
-  <!-- 右列：实时屏幕（不折叠） -->
-  <div class="card col-right">
-    <h2>7 · 实时屏幕镜像 &amp; 模拟点击 <span class="badge" id="resLabel">-</span></h2>
-    <div class="toolbar">
-      <button id="btnLive">▶ 开始镜像</button>
-      <button class="ghost" id="btnShot">截图并复制</button>
-      <button class="ghost" id="btnShotDl" disabled>下载 PNG</button>
-      <button class="ghost" id="btnBack">← 返回</button>
-      <button class="ghost" id="btnHome">⌂ 主页</button>
-      <span class="fps" id="fpsLabel"></span>
-    </div>
-    <div class="msg" id="shotMsg" style="text-align:center;"></div>
-    <div id="screenWrap">
-      <div id="screenFrame">
-        <canvas id="scrcpyCanvas" alt="屏幕镜像" style="display:none; max-height:calc(100vh - 260px); max-width:100%; cursor:crosshair; background:#000;"></canvas>
-        <img id="screen" alt="屏幕镜像" style="display:none;" />
-        <div id="tapMark"></div>
-        <div class="screen-empty" id="screenEmpty">点击「开始镜像」实时查看手机屏幕。<br>支持 WebCodecs 的浏览器（Chrome / Edge）走 scrcpy 硬件编码，30–60fps 低延迟；<br>在画面上点击 = 模拟点击手机，拖动 = 滑动。</div>
-      </div>
-    </div>
-    <div class="hint" style="text-align:center;">画面点击映射为设备真实坐标；按住拖动可滑动/滚动页面。</div>
+  <div id="view" data-page-node-id="4WnVam6IFRTDgCBeY3EE66">
+    <iframe id="frame" hidden data-page-node-id="Y2NMXnzJVZVLI014m6HVhm"></iframe>
   </div>
 </div>
 
-<div class="conn-modal" id="connModal" hidden>
-  <div class="conn-card">
-    <h3>后端连接</h3>
-    <div class="hint" style="margin-top:0;">本页面与运行在你自己电脑上的 h5-tool 后端（Python）通信。默认 <code>127.0.0.1:12787</code>，改了端口或部署到服务器后在这里调整，保存立即生效。</div>
-    <input id="connInput" style="margin-top:10px;" placeholder="http://127.0.0.1:12787" />
-    <div class="row" style="margin-top:10px;">
-      <button id="btnConnTest" class="ghost">测试连接</button>
-      <button id="btnConnSave">保存并重连</button>
-      <button id="btnConnClose" class="ghost">关闭</button>
+<!-- ===== 悬浮功能按钮 ===== -->
+<div class="fab" id="fabClip" data-mod="clip" title="剪贴板同步" data-page-node-id="YtNbnojbsSHqW3TYUUpR0R">📋</div>
+<div class="fab" id="fabFile" data-mod="file" title="文件推送" data-page-node-id="JmvQQ2CpODIoPhF6aOboxM">📁</div>
+<div class="fab" id="fabApk" data-mod="apk" title="APK 安装" data-page-node-id="xLWOllQPnijoW59TxB6MNK">📦</div>
+<div class="fab" id="fabMirror" data-mod="mirror" title="屏幕镜像" data-page-node-id="HZVyh90ouvURW2Hl3PzPDB">📺</div>
+<div class="fab" id="fabPort" data-mod="port" title="释放端口" data-page-node-id="klKtCrNLctDwqpxczgbReE">🔌</div>
+<div class="fab" id="fabClaude" data-mod="claude" title="Claude 延迟测试" data-page-node-id="IoJoW6ViOezl0KRMW31FSD">🧪</div>
+<div class="fab" id="fabCfg" data-mod="cfg" title="控制面板" data-page-node-id="aC04yYhdxQRVuFINzIU7xH">⚙</div>
+
+<!-- ===== 弹窗：剪贴板同步 ===== -->
+<div class="mod-modal" id="modClip" hidden data-page-node-id="GAxmjCa0AOzyhQVIEvBsAy">
+  <div class="mod-card" data-page-node-id="KlHRavmEsloRWzzfe8oFHm">
+    <div class="mod-bar" data-page-node-id="6crDVkhr45UHqkqILGFWl3"><span class="mod-title" data-page-node-id="VaovLyBxrZuW51QDDThHg3">📋 剪贴板同步</span><span class="mod-grow" data-page-node-id="RA3CFuTjRMVH9X9tqk9zMU"></span><button class="mod-close" data-close data-page-node-id="xE4pbXZliGK4Jxm8OqIuWx">✕</button></div>
+    <div class="mod-body" data-page-node-id="ppAbORxrvii9we6HE78brC">
+      <div class="row" data-page-node-id="SLKn4bX5IHNcivYGGrTn1G">
+        <span id="clipStatus" style="font-size:12px;color:var(--muted);" data-page-node-id="HMUXVbVFCNcvkcuCDF11rX">检测中…</span>
+        <button class="ghost" id="btnClipInstall" hidden style="margin-left:auto;" data-page-node-id="XXxCh4BTk37GNxZ6UVWeRj">安装到手机</button>
+      </div>
+      <div class="clip-hist" id="clipHist" data-page-node-id="x5rfnTIOklMnUoLTSmLkjl"><div class="hint" style="text-align:center;" data-page-node-id="CvLj6etA2qgaNAwVE3qigs">暂无同步记录</div></div>
+      <div class="hint" data-page-node-id="p76M1LJfw6zMVXxYjLBeiC">自动双向同步（仅文本）：手机复制 → 自动写入 Mac，Mac 复制 → 自动写入手机（每 2 秒检测，手机需亮屏解锁）。基于 <a href="https://github.com/polygraphene/adb-clip" target="_blank" style="color:var(--accent);" data-page-node-id="EUPQMH1LmKoGJoEXPIEDsM">adb-clip</a>，免装 App。</div>
+      <div class="msg" id="clipMsg" data-page-node-id="VEVmau918wTjhVCIsjKCCm"></div>
     </div>
-    <div class="msg" id="connMsg"></div>
+    <div class="mod-resize" data-page-node-id="hTy7Ol5DCvyh7wsEfhet2U"></div>
+  </div>
+</div>
+
+<!-- ===== 弹窗：文件推送 ===== -->
+<div class="mod-modal" id="modFile" hidden data-page-node-id="G1Lw0Eddd90Acv4c8bc0PM">
+  <div class="mod-card" data-page-node-id="2Tlcc6WoMpVLtJFTjaBkM5">
+    <div class="mod-bar" data-page-node-id="JgX5UlGuTThKv4JFADAHUT"><span class="mod-title" data-page-node-id="jkmXvjKnuUPFNX3NSFI2pg">📁 文件推送</span><span class="mod-grow" data-page-node-id="2a67NDZMUV5jzp93bCHRpB"></span><button class="mod-close" data-close data-page-node-id="0LNdfNi1gEEVFugBUC1p45">✕</button></div>
+    <div class="mod-body" data-page-node-id="cksR0PiSdY2VnxAH8E9qmv">
+      <div class="drop-zone" id="fileDrop" data-page-node-id="L3FAzyfR2XXVltHaG59KCK">
+        <div class="dz-icon" data-page-node-id="fJ1QTa6zUU0JEKcqcYxS6x">📁</div>
+        <div class="dz-text" data-page-node-id="Jgs8AP8RG9tlEFUNk1QAt4">拖拽文件到这里，或点击选择</div>
+        <div class="dz-sub" data-page-node-id="ptXbZmG3VONofPEexq6I5G">推送到手机 <code data-page-node-id="MeGQtj9TGg5rsstCnBFmoJ">/sdcard/Download/h5-tool/</code></div>
+        <input type="file" id="fileInput" multiple hidden data-page-node-id="8W8HRZP2j9cH0lJkG9nQ5Y" />
+      </div>
+      <div class="msg" id="fileMsg" data-page-node-id="WbcFNuOdwwdy6sqFfG0ziI"></div>
+      <div class="transfer-list" id="fileList" data-page-node-id="FXEKZERfMXhI88oUGOXBqc"></div>
+    </div>
+    <div class="mod-resize" data-page-node-id="D9TEwChQlbZ4kaj38TjorJ"></div>
+  </div>
+</div>
+
+<!-- ===== 弹窗：APK 安装 ===== -->
+<div class="mod-modal" id="modApk" hidden data-page-node-id="KymXqq0vaabmM8fmM4b9Rm">
+  <div class="mod-card" data-page-node-id="H8Xicy9QhWdHSWKMaYhVfo">
+    <div class="mod-bar" data-page-node-id="RmZHfj4TVtQ75676blkNt4"><span class="mod-title" data-page-node-id="JaWnqbMsuSD5b6HXou0z3v">📦 APK 安装</span><span class="mod-grow" data-page-node-id="IVVD6n5wQZOUj9iBtl4iwa"></span><button class="mod-close" data-close data-page-node-id="l5h7XhDO04lSdmoeYY4GfE">✕</button></div>
+    <div class="mod-body" data-page-node-id="mwgNOiKjdrThmXWphtFqBh">
+      <div class="drop-zone" id="apkDrop" data-page-node-id="ijXQ7OLqUeYDKwP4YOF807">
+        <div class="dz-icon" data-page-node-id="PktdiTMLvWWpBvEOlYJEPY">📦</div>
+        <div class="dz-text" data-page-node-id="s9Y4ps756eMyKnzukGvgrR">拖拽 APK 到这里，或点击选择</div>
+        <div class="dz-sub" data-page-node-id="WCR42XkFe3nHGyURuZoRoN">上传后自动 <code data-page-node-id="IAy7B6PN8ICPlseNoVkeMz">adb install -r</code> 安装到手机</div>
+        <input type="file" id="apkInput" accept=".apk" hidden data-page-node-id="4YyKdNr4OnX8Zwu2WKWeKv" />
+      </div>
+      <div class="msg" id="apkMsg" data-page-node-id="f1zDdAgynkSdBh1vbi7XVt"></div>
+      <div class="transfer-list" id="apkList" data-page-node-id="4Vkm5GLahg4z54mOlMUwZw"></div>
+    </div>
+    <div class="mod-resize" data-page-node-id="qNRpnZtAOU7LEPiL1lNBzw"></div>
+  </div>
+</div>
+
+<!-- ===== 弹窗：屏幕镜像（Android + iOS 统一） ===== -->
+<div class="mod-modal" id="modMirror" hidden data-page-node-id="Ep2M8W9dBw5QhHJBSUZizO">
+  <div class="mod-card" data-page-node-id="gdCL6CJkq4XQyAKuoGB3PH">
+    <div class="mod-bar" data-page-node-id="0Vm7XFTWd7LqRmOAq3qr9t"><span class="mod-title" data-page-node-id="esw8YWMudSpZbez4uAimFX">📺 屏幕镜像</span><span class="mod-grow" data-page-node-id="1xbQVijTDjBYVpYCdM689H"></span><button class="mod-close" data-close data-page-node-id="XoWSRhgAY2drRV484fuFSE">✕</button></div>
+    <div class="mod-body" id="mirrorBody" data-page-node-id="rtnS7akZ91DanTxsVgV9EE">
+      <div class="mirror-platform" data-page-node-id="vPmoO3rcCOI27oPKju2Kwz">
+        <span class="mp-label" data-page-node-id="C3mgXD6VYCvsnWC8BmBsAn">当前设备</span>
+        <span class="mp-tag" id="mirrorPlatformTag" data-page-node-id="ul9IirlrhWZ8ydmcNefMED">—</span>
+      </div>
+      <!-- Android 分支：scrcpy / PNG 镜像 -->
+      <div id="mirrorAndroid" style="display:flex;flex-direction:column;flex:1;min-height:0;" data-page-node-id="oFedfwpvBbXd0F42Sv3DCx">
+        <div class="toolbar" data-page-node-id="4BrWcGDbzCtz3ZSSklFFug">
+          <button id="btnLive" data-page-node-id="RGzLUrBpcr5heZLVr7bIBh">▶ 开始镜像</button>
+          <button class="ghost" id="btnShot" data-page-node-id="xwV74nDeI3H414uUdOIbmy">截图并复制</button>
+          <button class="ghost" id="btnShotDl" disabled data-page-node-id="Elv1vcbZfRCnAaZOwFa0iu">下载 PNG</button>
+          <button class="ghost" id="btnBack" data-page-node-id="XXqi7BS8xf4qGCxSFY5DWm">← 返回</button>
+          <button class="ghost" id="btnHome" data-page-node-id="vepfI3yVBSm2Htm602SaBb">⌂ 主页</button>
+          <span class="fps" id="fpsLabel" data-page-node-id="tXtUTDad0yGG7HicnAhGnU"></span>
+        </div>
+        <div class="msg" id="shotMsg" style="text-align:center;" data-page-node-id="6SD5TNcJJ1Fk7ek4edQ0DJ"></div>
+        <div id="screenWrap" data-page-node-id="a0O0oQFSKWnY8GljwLGJjF">
+          <div id="screenFrame" data-page-node-id="YbKEZAaXYH5CCyDAwsNq13">
+            <canvas id="scrcpyCanvas" alt="屏幕镜像" style="display:none;" data-page-node-id="vHAwsZ0WV2dQ0BSJK6Yn6z"></canvas>
+            <img id="screen" alt="屏幕镜像" style="display:none;" data-page-node-id="fn7KVtEJUIafSfxDAefDq6" />
+            <div id="tapMark" data-page-node-id="6rhrYxO92H8zcadig4NU7y"></div>
+            <div class="screen-empty" id="screenEmpty" data-page-node-id="9bXPhz6Uc1ICvvZwOPk0s7">点击「开始镜像」实时查看手机屏幕。<br data-page-node-id="CrA1YDDS7Aj3pgCW5q48bi">支持 WebCodecs 的浏览器（Chrome / Edge）走 scrcpy 硬件编码，30–60fps 低延迟；<br data-page-node-id="RyX44TQCVdYior75sFC7UO">在画面上点击 = 模拟点击手机，拖动 = 滑动。</div>
+          </div>
+        </div>
+        <div class="hint" style="text-align:center;" data-page-node-id="LmgDfUGZTEy8Fzcuml9tNl">画面点击映射为设备真实坐标；按住拖动可滑动/滚动页面。</div>
+      </div>
+      <!-- iOS 分支：pmd3 serve-web viewer -->
+      <div id="mirrorIos" style="display:none;flex-direction:column;flex:1;min-height:0;" hidden data-page-node-id="pYTwiP9ce0XpzpWqRM8r5H">
+        <div class="mirror-ios-row" data-page-node-id="eg6YKbUZZnKt3OtDUzAbkt">
+          <button id="iosMirrorOpen" data-page-node-id="XNVhvGxFjBtg4QS3atv7Hi">📺 开始 iOS 镜像</button>
+          <span class="m-state" id="iosMirrorState" data-page-node-id="9y7RuatOrVHrKzY0D0RZGC"></span>
+          <button class="ghost" id="iosMirrorStop" hidden data-page-node-id="3urjyvMPpFu7sFQoUEvZHC">⏹ 停止</button>
+        </div>
+        <div class="mirror-msg" id="iosMirrorMsg" hidden data-page-node-id="fDvwkjAQQltnS8AUrELW2X"></div>
+        <div class="mirror-ios-frame" data-page-node-id="o3s2NnbdwFe3imuPdcqWL1"><iframe id="iosMirrorFrame" data-page-node-id="Wv95v3fw49wWyZSFdyPMd7"></iframe></div>
+        <div class="mirror-tip" data-page-node-id="i3JCoWV4nl0SyEFWf28W7p">屏幕流需 iPhone 系统 iOS 27+（iOS 26 及更早不开放 displayservice，换机无用）；首次连接需 10~40 秒（起隧道 + 设备开媒体流）。Windows 浏览器需支持 HEVC 解码（Chrome/Edge 需系统「HEVC 视频扩展」，Safari 无需）。点画面=点击，按住拖动=滑动。</div>
+      </div>
+    </div>
+    <div class="mod-resize" data-page-node-id="0vbHUcRqEukkQBkW4JlzY6"></div>
+  </div>
+</div>
+
+<!-- ===== 弹窗：释放端口 ===== -->
+<div class="mod-modal" id="modPort" hidden data-page-node-id="LOPiZahk0kFPeyoz8v3hjM">
+  <div class="mod-card" data-page-node-id="rHHHsBtHA3frJNLNRNaNKR">
+    <div class="mod-bar" data-page-node-id="GFJhBJXluFgCDBzUfHhPFo"><span class="mod-title" data-page-node-id="A8hx5cw9wUEfJrsBkR81nC">🔌 释放端口</span><span class="mod-grow" data-page-node-id="5tCG2mQT84oIGBvbj2NADx"></span><button class="mod-close" data-close data-page-node-id="RJ6fmc2r71S8ZKzRWCOgA8">✕</button></div>
+    <div class="mod-body" data-page-node-id="h8d3pHRlPXdZsIoZbni4Vt">
+      <div class="port-grid" id="portGrid" data-page-node-id="zMX2IWcaUCGGJLs1NWwqHQ"></div>
+      <div class="row" style="margin-top:10px;" data-page-node-id="HL9hsvDfTSUd7UQdaDVuQP">
+        <input id="portCustom" type="number" min="1" max="65535" placeholder="自定义端口，如 3000" data-page-node-id="AXYBUyZAGTeYWhUGiu477W" />
+        <button id="btnKillCustom" data-page-node-id="D0SQ88WHQKvl8qLZsdClR2">释放</button>
+      </div>
+      <div class="hint" data-page-node-id="f7UvavsOajRMIJmXUcs3pf">点击即杀掉占用该端口的进程（<code data-page-node-id="ibiGHyI64RUrCB8TeJAb7j">lsof</code> + <code data-page-node-id="wOKe13EtybgFgiSEv9O2hS">kill -9</code>）；本工具自身端口受保护。</div>
+      <div class="msg" id="portMsg" data-page-node-id="WYRvtTlc2uAYgsq63hzuhr"></div>
+    </div>
+    <div class="mod-resize" data-page-node-id="JT8uXAr13szEhVYqWdAFpu"></div>
+  </div>
+</div>
+
+<!-- ===== 弹窗：Claude 延迟测试 ===== -->
+<div class="mod-modal" id="modClaude" hidden data-page-node-id="0XLnqAmZ0OVQukhescXH0G">
+  <div class="mod-card" data-page-node-id="HSIhaqLansQDsoakqYIBxx">
+    <div class="mod-bar" data-page-node-id="HNxJhYiCn84raIsOaMD5zv"><span class="mod-title" data-page-node-id="qKmx7LEWjn3JEB4qbE1VAn">🧪 Claude 节点延迟</span><span class="mod-grow" data-page-node-id="OTfSOwRJJqALIp3mjtNMDC"></span><button class="mod-close" data-close data-page-node-id="qB83kemR4BWLgZewU6WEgs">✕</button></div>
+    <div class="mod-body" data-page-node-id="JDBJhTmKOf8ObEi3f8nBVA">
+      <div class="row" data-page-node-id="mbgk1xHJH61BRiFC3F8Ghi">
+        <button id="btnClaudeTest" data-page-node-id="qAz0PEi2B8xdPnrM5FB8DD">测一下</button>
+        <button class="ghost" id="btnClaudeClear" data-page-node-id="HhPQPYUTq4wzUR2bIU5DJz">清空记录</button>
+      </div>
+      <div class="claude-now" data-page-node-id="xqCQ9oibPoV9CFlGrzqmW2">
+        <span class="claude-rate" id="claudeRate" data-page-node-id="GTyB17bCLFyKk7djxCclqa">—</span>
+        <span id="claudeProxy" class="claude-proxy" data-page-node-id="GvIDmybQX4DlGuupC7bAAn"></span>
+      </div>
+      <div class="claude-metrics" id="claudeMetrics" data-page-node-id="5Bnw20ZaTC0idpMmQJbw8N"></div>
+      <div class="hint" data-page-node-id="9RHtXdfF8o6weaS7EokRC6">测当前出口节点到 <code data-page-node-id="NTClGhyJIn0G5yj8EbYcsp">api.anthropic.com</code> 的延迟：TCP 直连 + HTTPS 经代理往返（无需 API Key）。切换节点后点「测一下」即可对比；若新节点只在交互 shell 里设了代理，需重启 h5-tool 后端生效（<code data-page-node-id="zI6zbmrE1rCkfBpZc0VlUC">h5-tool restart</code> 或 Ctrl+C 后重新 start）。</div>
+      <div class="claude-hist" id="claudeHist" data-page-node-id="MXHAriZBnPLyF9iJyicsVz"></div>
+    </div>
+    <div class="mod-resize" data-page-node-id="JN1pFU5xnom2eSFUosktWf"></div>
+  </div>
+</div>
+
+<!-- ===== 弹窗：控制面板 ===== -->
+<div class="mod-modal" id="modCfg" hidden data-page-node-id="cyXhbP0C6Mm68P12jxSQLO">
+  <div class="mod-card" data-page-node-id="BNDhv9XJsFUJdQunNyFFgO">
+    <div class="mod-bar" data-page-node-id="tRSUrW4mq3U6Cy6CxojCv5"><span class="mod-title" data-page-node-id="urtE7dlbgkwMQdLMEAnLyA">⚙ 控制面板</span><span class="mod-grow" data-page-node-id="8A4oGqhqO9qmH52wiwXMel"></span><button class="mod-close" data-close data-page-node-id="GbVyJ0ZpGRKiHgzOKoBsRN">✕</button></div>
+    <div class="mod-body" data-page-node-id="y5I6tEc8t0BMd4c0lGxc0y">
+      <div class="cfg-field" data-page-node-id="JnYEc7A9WyF1AF5QkMkeBw">
+        <label data-page-node-id="MUUKoIWt94mgKuomLzT50e">接口地址（后端 backend）</label>
+        <div class="cfg-tip" data-page-node-id="lsU5cvkhLDbrHp47ZtDhRc">与运行在你自己电脑上的 h5-tool 后端通信，默认 <code data-page-node-id="kaTczhMV6Rsp4nSWsR8Spk">127.0.0.1:12787</code>；改了端口或部署到服务器后在这里调整，保存立即重连。</div>
+        <input id="cfgBackendInput" placeholder="http://127.0.0.1:12787" spellcheck="false" autocomplete="off" data-page-node-id="p0oB3BIWPZt70JS27SwBJz" />
+        <div class="cfg-row" data-page-node-id="wM2h9KHmVbN7h8CiuSrUN3"><button id="cfgBackendSave" data-page-node-id="fL2wVVbwcPoAhfn5FFesI7">保存并重连</button></div>
+        <div class="cfg-msg" id="cfgBackendMsg" data-page-node-id="gW4KTeyVlVaBSKM99dYv4n"></div>
+      </div>
+      <div class="cfg-field" data-page-node-id="DDiXAJRunovlqhtNQrUZ10">
+        <label data-page-node-id="oGYmHACRK2DtcLQ1SEvUti">缓存源站地址（DevTools 面板源）</label>
+        <div class="cfg-tip" data-page-node-id="4CNmm97ebSqBf2sajhSXq8">DevTools 面板资源（inspector.html 等）按需从下方地址拉取，缓存到本地 <code data-page-node-id="XiNbiqEGxvl3NfjniDQUQ6">devtools-local/.remote-cache/</code>；支持 http(s) URL 或本地 front_end 目录路径。保存后立即生效，源变更会自动清空旧缓存。</div>
+        <input id="cfgInput" placeholder="http(s)://… 或本地 front_end 路径" spellcheck="false" autocomplete="off" data-page-node-id="BBokcs8WMA3eKjpfNG4gQT" />
+        <div class="cfg-row" data-page-node-id="tPwXrGbBnVkpeoOAuUHyqV">
+          <button id="cfgSave" data-page-node-id="p85OkEpowD6tG0S6sAkR3A">保存并生效</button>
+          <button class="ghost" id="cfgReset" data-page-node-id="66LQcvn04SgTo16hjxMlzl">恢复默认</button>
+        </div>
+        <div class="cfg-msg" id="cfgMsg" data-page-node-id="MrXslgasLYo0VR0smU92uD"></div>
+        <div class="cfg-tip" data-page-node-id="FvOJB1CMtBJgh4CBcxG5Fc">默认：<code id="cfgDefault" data-page-node-id="r1DsoO4qJGsI0M5EETLtW5">…</code></div>
+      </div>
+      <div class="cfg-field" data-page-node-id="tqTV2IHA9FudpWmpFyItHC">
+        <label data-page-node-id="O4Jm4VLDUSYursRAclST93">功能模块入口显隐</label>
+        <div id="moduleToggles" data-page-node-id="7zRWQ6eQDufnyYvJi7neN3"></div>
+      </div>
+    </div>
+    <div class="mod-resize" data-page-node-id="BK6IRCCgd1RV3hqOHfXAxa"></div>
   </div>
 </div>
 
 <script src="config.js"></script>
-<script src="app.js"></script>
+<script>
+/* =====================================================================
+ * 基础层：后端地址 / API 封装 / 设备选择（devtools 原逻辑，保留）
+ * ===================================================================== */
+const CFG = window.H5TOOL_CONFIG || {};
+const LS_BACKEND = "h5tool.backend";
+function resolveBackend() {
+  const q = new URLSearchParams(location.search).get("backend");
+  if (q) { try { localStorage.setItem(LS_BACKEND, q); } catch (e) {} return q.replace(/\/+$/, ""); }
+  const ls = localStorage.getItem(LS_BACKEND);
+  if (ls) return ls.replace(/\/+$/, "");
+  return (CFG.backend || "").replace(/\/+$/, "");
+}
+let API_BASE = resolveBackend();
+const apiUrl = (path) => API_BASE + path;
+
+function targetSpaceOf(url) {
+  try {
+    const h = new URL(url).hostname;
+    if (h === "127.0.0.1" || h === "localhost" || h === "::1" || h === "[::1]") return "loopback";
+    if (h.startsWith("10.") || h.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(h) || h.startsWith("169.254.") ||
+        h.endsWith(".local")) return "local";
+    return "public";
+  } catch (e) { return "public"; }
+}
+const fetchOpts = (opts) => Object.assign({}, opts, { targetAddressSpace: targetSpaceOf(API_BASE) });
+
+const LS_DEVICE = "h5tool.device";
+let device = new URLSearchParams(location.search).get("device") ||
+             (() => { try { return localStorage.getItem(LS_DEVICE); } catch (e) { return null; } })();
+const apiUrlDev = (path) => device
+  ? apiUrl(path) + (path.includes("?") ? "&" : "?") + "device=" + encodeURIComponent(device)
+  : apiUrl(path);
+
+// 统一 API 封装（JSON 自动解析 + 错误抛出）
+async function api(path, opts) {
+  const res = await fetch(apiUrlDev(path), fetchOpts(opts));
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res;
+}
+
+const $ = (id) => document.getElementById(id);
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+function truncate(s, n) {
+  s = String(s ?? "");
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+function setMsg(el, text, ok) {
+  el.textContent = text;
+  el.className = "msg " + (ok ? "ok" : "err");
+}
+
+const targets = {};
+let activeTargetId = null;
+
+/* =====================================================================
+ * 设备管理 + WebView 调试目标列表 + DevTools iframe（devtools 原逻辑）
+ * ===================================================================== */
+function deviceLabel(dev) {
+  if (!dev) return "未知设备";
+  const idx = dev.indexOf(":");
+  const scope = idx > 0 ? dev.slice(0, idx) : "device";
+  const id = idx > 0 ? dev.slice(idx + 1) : dev;
+  const shortId = (scope === "device" && id.length > 13) ? id.slice(0, 13) : id;
+  const kind = scope === "sim" ? "模拟器" : (scope === "device" ? "真机" : scope);
+  return (kind + " " + shortId).trim();
+}
+
+async function loadDevices() {
+  const box = $("deviceTabs");
+  try {
+    const r = await fetch(apiUrl("/api/devices"), fetchOpts());
+    const data = await r.json();
+    const adbOk = !data.adb || data.adb.installed;
+    const adbBanner = $("adbBanner");
+    if (adbBanner) adbBanner.hidden = adbOk;
+    const all = data.devices || [];
+    const android = all.filter((d) => d.platform !== "ios");
+    const iosTabs = all.filter((d) => d.platform === "ios");
+    if (!adbOk && !all.length) {
+      box.innerHTML = '<span class="tab-empty" style="color:var(--err);font-weight:600;">⚠ adb 未安装</span>';
+      return;
+    }
+    if (!all.length) {
+      box.innerHTML = '<span class="tab-empty">无设备</span>';
+      return;
+    }
+    let keep = device;
+    const ids = all.map((d) => d.serial);
+    if (!ids.includes(keep)) {
+      const wasIos = String(keep || "").startsWith("ios");
+      let next;
+      if (wasIos && iosTabs.length) next = iosTabs[0].serial;
+      else if (iosTabs.length && (!android.length || !adbOk)) next = iosTabs[0].serial;
+      else if (data.default && ids.includes(data.default)) next = data.default;
+      else next = ids[0];
+      keep = next;
+    }
+    const ordered = [
+      ...all.filter((d) => d.serial === keep),
+      ...all.filter((d) => d.serial !== keep),
+    ];
+    box.innerHTML = ordered.map((d) => {
+      const active = d.serial === keep ? " active" : "";
+      if (d.platform === "ios") {
+        const devKey = d.device_key || String(d.serial).slice(4);
+        const label = truncate(deviceLabel(devKey), 22);
+        return `<button class="device-tab${active}" data-serial="${d.serial}" title="iOS ${escapeHtml(devKey)} · Safari / App 内 WKWebView">${escapeHtml(label)}<span class="sub">iOS</span></button>`;
+      }
+      const model = (d.model || "").replace(/_/g, " ") || "Android";
+      return `<button class="device-tab${active}" data-serial="${d.serial}" title="序列号：${d.serial}">${model}<span class="sub">${d.serial}</span></button>`;
+    }).join("");
+    if (window.__dockEnsurePlaced) window.__dockEnsurePlaced();
+    if (keep !== device) {
+      device = keep;
+      try { localStorage.setItem(LS_DEVICE, keep); } catch (e) {}
+      load(true);
+      if (window.__onDeviceChange) window.__onDeviceChange();
+    }
+  } catch (e) {
+    box.innerHTML = '<span class="tab-empty">后端未连接</span>';
+    const adbBanner = $("adbBanner");
+    if (adbBanner) adbBanner.hidden = true;
+  }
+}
+
+async function load(showLoading) {
+  let data = { phone: [], phone_error: null, ios: null };
+  try {
+    if (showLoading) $("phoneList").innerHTML = '<div class="empty">加载中…</div>';
+    const r = await fetch(apiUrlDev("/api/webview-targets"), fetchOpts());
+    data = await r.json();
+  } catch (e) {
+    data.phone_error = "请求后端失败：" + e.message;
+  }
+  const isIos = String(device || "").startsWith("ios");
+  setSection(isIos ? "ios" : "android");
+  if (isIos) renderIosList(data.ios);
+  else renderList("phoneList", "dotPhone", data.phone, data.phone_error);
+}
+
+function targetCard(t, badge) {
+  return (
+    '<div class="target' + (t.id === activeTargetId ? " active" : "") + '" data-id="' + t.id +
+      '" title="点击在右侧打开" onclick="openTarget(\'' + t.id + '\')">' +
+      '<div class="t-title"><span class="badge">' + escapeHtml(badge) + "</span>" +
+        escapeHtml(truncate(t.title, 40)) + "</div>" +
+      '<div class="t-url">' + escapeHtml(t.url || "") + "</div>" +
+      '<div class="ops">' +
+        '<button onclick="event.stopPropagation();openTarget(\'' + t.id + '\')">内嵌打开</button>' +
+        '<button class="ghost" onclick="event.stopPropagation();openWindow(\'' + t.id + '\')">新窗口</button>' +
+      "</div>" +
+    "</div>"
+  );
+}
+
+function renderList(listId, dotId, list, err) {
+  const el = $(listId);
+  const dot = $(dotId);
+  dot.className = "dot" + (list && list.length ? " on" : "");
+  if (err) { el.innerHTML = '<div class="err">' + escapeHtml(err) + "</div>"; return; }
+  if (!list || !list.length) { el.innerHTML = '<div class="empty">无可调试目标</div>'; return; }
+  el.innerHTML = list
+    .filter((t) => t.ws)
+    .map((t) => { targets[t.id] = t; return targetCard(t, t.type || "page"); })
+    .join("");
+}
+
+function renderIosList(ios) {
+  const el = $("phoneList");
+  const dot = $("dotPhone");
+  const warn = (ios && ios.targets_warning)
+    ? '<div class="ios-warn">⚠ ' + escapeHtml(ios.targets_warning) + "</div>"
+    : "";
+  const show = (cls, html) => { dot.className = "dot"; el.innerHTML = warn + '<div class="' + cls + '">' + html + "</div>"; };
+  if (!ios) return show("err", "后端未返回 iOS 桥状态");
+  if (!ios.supported) return show("err", "当前环境不支持 iOS 真机调试（pymobiledevice3 不可用）。");
+  if (!ios.tool) return show("err",
+    "未检测到 pymobiledevice3 引擎：<code>brew install pymobiledevice3</code>（或 <code>pipx install pymobiledevice3</code>）。"
+    + "<br>Windows 另需安装 iTunes / Apple Devices（提供 usbmuxd 驱动）。装好后刷新页面。");
+  if (ios.error) return show("err", "iOS 调试桥异常：" + escapeHtml(ios.error));
+  if (ios.starting && !ios.running) return show("empty",
+    "iOS 调试桥启动中…（pymobiledevice3 连接真机，约 5~20 秒，此页每 5 秒自动刷新）");
+  const list = (ios.targets || []).filter((t) => t.ws);
+  dot.className = "dot" + (list.length ? " on" : "");
+  if (!list.length) return show("empty",
+    "无可调试目标：<br>· iPhone 真机 Safari：先在手机上打开要调试的页面；<br>"
+    + "· 首次连接：Finder（访达）侧栏点该设备 → 手机弹窗点「信任此电脑」并解锁，"
+    + "再到手机 设置→Safari→高级→打开「Web 检查器」；<br>· App 内 H5：App 需允许 Web Inspector（一般 Debug 包开启）。");
+  const uniqDevs = list.map((t) => t.device || "?").filter((v, i, a) => a.indexOf(v) === i);
+  if (uniqDevs.length <= 1) {
+    el.innerHTML = warn + list.map((t) => {
+      targets[t.id] = t;
+      const badge = (t.app || "").split(".").pop() || "iOS";
+      return targetCard(t, badge);
+    }).join("");
+    return;
+  }
+  const groups = {};
+  list.forEach((t) => {
+    const k = t.device || "unknown";
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(t);
+  });
+  el.innerHTML = warn + Object.keys(groups).sort().map((dev) => {
+    const items = groups[dev];
+    const apps = Array.from(new Set(items.map((t) => t.app).filter(Boolean)))
+      .map((a) => escapeHtml(a.split(".").pop() || a)).join(" / ");
+    return (
+      '<div class="dev-group"><span class="dg-id">' + escapeHtml(deviceLabel(dev)) +
+        '</span>' + (apps ? '<span class="dg-app">' + apps + '</span>' : "") +
+        '<span class="dg-cnt">' + items.length + ' 页</span></div>' +
+      items.map((t) => {
+        targets[t.id] = t;
+        const badge = (t.app || "").split(".").pop() || "iOS";
+        return targetCard(t, badge);
+      }).join("")
+    );
+  }).join("");
+}
+
+function setSection(platform) {
+  const isIos = platform === "ios";
+  if ($("secTitle").lastChild) $("secTitle").lastChild.textContent = isIos ? " iOS Safari / App WebView" : " 手机 WebView";
+  const hint = $("secHint");
+  if (isIos) {
+    hint.innerHTML =
+      '点开在右侧使用完整 DevTools（console / 断点 / network / storage）。<br>' +
+      'iOS 需：Safari 打开页面，或 App 内打开 H5（App 需 <code>webView.isInspectable = true</code>，一般 Debug 包开启）。';
+  } else {
+    hint.innerHTML =
+      '点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>' +
+      '「新窗口」独立打开。<br>手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。';
+  }
+}
+
+function devtoolsPanelUrl() {
+  if (CFG.devtoolsPanel) return CFG.devtoolsPanel;
+  const h = location.hostname;
+  const loopback = h === "127.0.0.1" || h === "localhost" || h === "::1" || h === "[::1]";
+  return loopback ? "/devtools/inspector.html" : "/front_end/inspector.html";
+}
+function devtoolsUrl(t) {
+  const qs = device ? "?device=" + encodeURIComponent(device) : "";
+  const bare = API_BASE.replace(/^https?:\/\//, "") + "/cdp-ws/" + t.id + qs;
+  return devtoolsPanelUrl() + "?ws=" + encodeURIComponent(bare);
+}
+function openTarget(id) {
+  const t = targets[id];
+  if (!t) return;
+  activeTargetId = id;
+  updateTargetActive();
+  const frame = $("frame");
+  frame.hidden = false;
+  frame.src = devtoolsUrl(t);
+}
+function openWindow(id) {
+  const t = targets[id];
+  if (!t) return;
+  window.open(devtoolsUrl(t), "_blank");
+}
+function updateTargetActive() {
+  document.querySelectorAll(".target").forEach((el) => {
+    el.classList.toggle("active", el.dataset.id === activeTargetId);
+  });
+}
+function setActiveTab(serial) {
+  const box = $("deviceTabs");
+  let moved = null;
+  document.querySelectorAll(".device-tab").forEach((b) => {
+    const on = b.dataset.serial === serial;
+    b.classList.toggle("active", on);
+    if (on) moved = b;
+  });
+  if (moved) box.prepend(moved);
+}
+function switchDevice(serial) {
+  if (!serial || serial === device) return;
+  device = serial;
+  try { localStorage.setItem(LS_DEVICE, serial); } catch (err) {}
+  setActiveTab(serial);
+  load(true);
+  if (window.__onDeviceChange) window.__onDeviceChange();
+}
+
+loadDevices();
+load();
+setInterval(load, 5000);
+setInterval(() => { try { loadDevices(); } catch (e) {} }, 8000);
+
+/* =====================================================================
+ * 设备悬浮面板拖动（devtools 原逻辑）
+ * ===================================================================== */
+(() => {
+  const dock = document.getElementById("deviceDock");
+  if (!dock) return;
+  const LS_POS = "h5tool.deviceDock.pos";
+  let drag = null;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function rectPos() { const r = dock.getBoundingClientRect(); return { x: r.left, y: r.top }; }
+  function placePx(x, y) {
+    dock.style.transform = "none";
+    const maxX = window.innerWidth - dock.offsetWidth;
+    const maxY = window.innerHeight - dock.offsetHeight;
+    dock.style.left = clamp(x, 6, Math.max(6, maxX - 6)) + "px";
+    dock.style.top = clamp(y, 6, Math.max(6, maxY - 6)) + "px";
+  }
+  let placed = false;
+  const readMem = () => { try { return JSON.parse(localStorage.getItem(LS_POS) || "null"); } catch (e) { return null; } };
+  function restoreMem() { const p = readMem(); if (p && isFinite(p.x) && isFinite(p.y)) { placePx(p.x, p.y); placed = true; } }
+  window.__dockEnsurePlaced = function ensurePlaced() {
+    if (placed) return;
+    restoreMem();
+    if (!placed && getComputedStyle(dock).transform !== "none") {
+      const cur = rectPos(); placePx(cur.x, cur.y); placed = true;
+    }
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restoreMem);
+  else restoreMem();
+  let snapBack = null;
+  function maybePullIn() {
+    if (getComputedStyle(dock).transform !== "none") { const cur = rectPos(); placePx(cur.x, cur.y); }
+    const r = dock.getBoundingClientRect();
+    let dx = 0, dy = 0;
+    if (r.right > window.innerWidth - 10) dx = r.right - window.innerWidth + 10;
+    if (r.bottom > window.innerHeight - 10) dy = r.bottom - window.innerHeight + 10;
+    if (dx > 0 || dy > 0) {
+      if (snapBack === null) {
+        snapBack = { left: dock.style.left, top: dock.style.top };
+        dock.style.left = Math.max(6, r.left - dx) + "px";
+        dock.style.top = Math.max(6, r.top - dy) + "px";
+      }
+    }
+  }
+  let pullInTimer = null;
+  dock.addEventListener("mouseenter", () => { clearTimeout(pullInTimer); pullInTimer = setTimeout(maybePullIn, 260); });
+  dock.addEventListener("mouseleave", () => {
+    clearTimeout(pullInTimer);
+    if (snapBack !== null) { dock.style.left = snapBack.left; dock.style.top = snapBack.top; snapBack = null; }
+  });
+  dock.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    clearTimeout(pullInTimer);
+    snapBack = null;
+    const cur = rectPos();
+    if (getComputedStyle(dock).transform !== "none") placePx(cur.x, cur.y);
+    drag = { px: e.clientX, py: e.clientY, x: cur.x, y: cur.y, moved: false, tab: e.target.closest ? e.target.closest(".device-tab") : null };
+    dock.classList.add("dragging");
+    try { dock.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  dock.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.px, dy = e.clientY - drag.py;
+    if (!drag.moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) drag.moved = true;
+    if (drag.moved) placePx(drag.x + dx, drag.y + dy);
+  });
+  function endDrag(e) {
+    if (!drag) return;
+    dock.classList.remove("dragging");
+    try { dock.releasePointerCapture(e.pointerId); } catch (err) {}
+    const wasMoved = drag.moved, hitTab = drag.tab;
+    drag = null;
+    if (wasMoved) {
+      const pos = rectPos();
+      try { localStorage.setItem(LS_POS, JSON.stringify({ x: pos.x, y: pos.y })); } catch (err) {}
+    } else if (hitTab && !hitTab.classList.contains("active")) {
+      switchDevice(hitTab.dataset.serial || null);
+    }
+  }
+  dock.addEventListener("pointerup", endDrag);
+  dock.addEventListener("pointercancel", (e) => { if (!drag) return; dock.classList.remove("dragging"); drag = null; });
+  dock.addEventListener("dragstart", (e) => e.preventDefault());
+})();
+
+/* =====================================================================
+ * 悬浮功能按钮：各自独立拖动 + 点击开弹窗 + 默认左下角竖向排列
+ * ===================================================================== */
+const MODULES = [
+  { key: 'clip',   fabId: 'fabClip',   modalId: 'modClip',   label: '剪贴板同步' },
+  { key: 'file',   fabId: 'fabFile',   modalId: 'modFile',   label: '文件推送' },
+  { key: 'apk',    fabId: 'fabApk',    modalId: 'modApk',    label: 'APK 安装' },
+  { key: 'mirror', fabId: 'fabMirror', modalId: 'modMirror', label: '屏幕镜像' },
+  { key: 'port',   fabId: 'fabPort',   modalId: 'modPort',   label: '释放端口' },
+  { key: 'claude', fabId: 'fabClaude', modalId: 'modClaude', label: 'Claude 延迟' },
+];
+const CFG_FAB = { key: 'cfg', fabId: 'fabCfg', modalId: 'modCfg', label: '控制面板' };
+
+const LS_MODULES = "h5tool.modules";
+let moduleVis = { clip: true, file: true, apk: true, mirror: true, port: true, claude: true };
+try { Object.assign(moduleVis, JSON.parse(localStorage.getItem(LS_MODULES)) || {}); } catch (e) {}
+
+function applyModuleVis() {
+  MODULES.forEach((m) => {
+    const fab = document.getElementById(m.fabId);
+    if (fab) fab.classList.toggle("fab-hidden", !moduleVis[m.key]);
+  });
+}
+
+// 默认位置：左下角竖向排列（从下往上：控制面板最靠下）
+const FAB_ORDER = [...MODULES.map((m) => m.key), 'cfg'];
+const FAB_SIZE = 46, FAB_GAP = 58, FAB_MARGIN = 16;
+const FAB_BY_KEY = {};
+MODULES.forEach((m) => { FAB_BY_KEY[m.key] = m; });
+FAB_BY_KEY.cfg = CFG_FAB;
+function defaultFabPos(key) {
+  const i = FAB_ORDER.indexOf(key);
+  return { x: FAB_MARGIN, y: window.innerHeight - FAB_MARGIN - FAB_SIZE - i * FAB_GAP };
+}
+function restoreFabPos(el, key) {
+  const lsKey = "h5tool.fab.pos." + key;
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem(lsKey) || "null"); } catch (e) {}
+  if (p && isFinite(p.x) && isFinite(p.y)) {
+    el.style.left = p.x + "px";
+    el.style.top = p.y + "px";
+  } else {
+    const d = defaultFabPos(key);
+    el.style.left = d.x + "px";
+    el.style.top = d.y + "px";
+  }
+}
+function makeFabDraggable(el, key) {
+  const lsKey = "h5tool.fab.pos." + key;
+  let drag = null;
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    const r = el.getBoundingClientRect();
+    drag = { sx: e.clientX - r.left, sy: e.clientY - r.top, ox: r.left, oy: r.top, moved: false };
+    el.classList.add("dragging");
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const x = e.clientX - drag.sx, y = e.clientY - drag.sy;
+    if (!drag.moved && (Math.abs(x - drag.ox) > 3 || Math.abs(y - drag.oy) > 3)) drag.moved = true;
+    if (drag.moved) {
+      el.style.left = Math.max(0, Math.min(x, window.innerWidth - FAB_SIZE)) + "px";
+      el.style.top = Math.max(0, Math.min(y, window.innerHeight - FAB_SIZE)) + "px";
+    }
+  });
+  function end(e) {
+    if (!drag) return;
+    el.classList.remove("dragging");
+    try { el.releasePointerCapture(e.pointerId); } catch (err) {}
+    const moved = drag.moved;
+    drag = null;
+    if (moved) {
+      const r = el.getBoundingClientRect();
+      try { localStorage.setItem(lsKey, JSON.stringify({ x: r.left, y: r.top })); } catch (err) {}
+    } else {
+      // 纯点击 → 打开对应弹窗
+      const m = FAB_BY_KEY[key];
+      if (m) openModal(m.modalId);
+    }
+  }
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", (e) => { if (!drag) return; el.classList.remove("dragging"); drag = null; });
+  el.addEventListener("dragstart", (e) => e.preventDefault());
+}
+
+// =====================================================================
+// 通用弹窗：打开（居中）/ 关闭 / 拖动 / 缩放
+// =====================================================================
+function openModal(id) {
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  const card = modal.querySelector(".mod-card");
+  modal.hidden = false; // 先显示，触发布局，才能量到真实尺寸
+  if (!card.style.left || !card.style.top) {
+    const w = card.offsetWidth, h = card.offsetHeight;
+    card.style.left = Math.max(8, (window.innerWidth - w) / 2) + "px";
+    card.style.top = Math.max(8, (window.innerHeight - h) / 2) + "px";
+  }
+  if (window.__onModalOpen) window.__onModalOpen(id);
+}
+function closeModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.hidden = true;
+}
+
+document.querySelectorAll(".mod-modal").forEach((modal) => {
+  const card = modal.querySelector(".mod-card");
+  const bar = modal.querySelector(".mod-bar");
+  const resize = modal.querySelector(".mod-resize");
+  const closeBtn = modal.querySelector("[data-close]");
+  // 关闭
+  if (closeBtn) closeBtn.addEventListener("click", () => { modal.hidden = true; });
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.hidden = true; });
+  // 拖动（标题栏）
+  let drag = null;
+  if (bar) {
+    bar.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("button")) return;
+      const r = card.getBoundingClientRect();
+      drag = { sx: e.clientX - r.left, sy: e.clientY - r.top };
+      try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      card.style.left = Math.max(-card.offsetWidth + 60, Math.min(e.clientX - drag.sx, window.innerWidth - 60)) + "px";
+      card.style.top = Math.max(0, Math.min(e.clientY - drag.sy, window.innerHeight - 40)) + "px";
+    });
+    const endDrag = () => { drag = null; };
+    bar.addEventListener("pointerup", endDrag);
+    bar.addEventListener("pointercancel", endDrag);
+  }
+  // 缩放（右下角）
+  let rs = null;
+  if (resize) {
+    resize.addEventListener("pointerdown", (e) => {
+      rs = { x: e.clientX, y: e.clientY, w: card.offsetWidth, h: card.offsetHeight };
+      try { resize.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    resize.addEventListener("pointermove", (e) => {
+      if (!rs) return;
+      const rect = card.getBoundingClientRect();
+      const w = Math.max(280, rs.w + (e.clientX - rs.x));
+      const h = Math.max(180, rs.h + (e.clientY - rs.y));
+      card.style.width = Math.min(w, window.innerWidth - rect.left) + "px";
+      card.style.height = Math.min(h, window.innerHeight - rect.top) + "px";
+    });
+    const endRs = () => { rs = null; };
+    resize.addEventListener("pointerup", endRs);
+    resize.addEventListener("pointercancel", endRs);
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".mod-modal").forEach((m) => { if (!m.hidden) m.hidden = true; });
+  }
+});
+
+// 初始化悬浮按钮：位置 + 拖动 + 显隐
+MODULES.forEach((m) => {
+  const el = document.getElementById(m.fabId);
+  if (!el) return;
+  restoreFabPos(el, m.key);
+  makeFabDraggable(el, m.key);
+});
+(() => {
+  const el = document.getElementById(CFG_FAB.fabId);
+  if (el) { restoreFabPos(el, 'cfg'); makeFabDraggable(el, 'cfg'); }
+})();
+applyModuleVis();
+
+// =====================================================================
+// 控制面板：接口地址 / 缓存源站 / 模块显隐
+// =====================================================================
+(() => {
+  // --- 接口地址 ---
+  const bInput = $("cfgBackendInput"), bSave = $("cfgBackendSave"), bMsg = $("cfgBackendMsg");
+  function refreshBackend() { bInput.value = API_BASE; }
+  bSave.addEventListener("click", () => {
+    const base = bInput.value.trim().replace(/\/+$/, "");
+    if (!base) return setMsg(bMsg, "请输入后端地址", false);
+    try { localStorage.setItem(LS_BACKEND, base); } catch (e) {}
+    API_BASE = base;
+    setMsg(bMsg, "✓ 已保存，正在重连…", true);
+    loadDevices();
+    load(true);
+  });
+
+  // --- 缓存源站（DevTools 面板源，走后端 /api/devtools-source 热生效） ---
+  const sInput = $("cfgInput"), sState = $("cfgSave"), sReset = $("cfgReset"), sMsg = $("cfgMsg"), sDef = $("cfgDefault");
+  const setSourceMsg = (t, ok) => { sMsg.textContent = t || ""; sMsg.className = "cfg-msg" + (t ? (ok ? " ok" : " err") : ""); };
+  async function refreshSource() {
+    try {
+      const r = await fetch(apiUrl("/api/devtools-source"), fetchOpts());
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      sDef.textContent = d.default || "—";
+      sInput.placeholder = d.default || "http(s)://… 或本地路径";
+      const customized = !!(d.configured && d.configured !== d.default);
+      sInput.value = d.configured || d.effective || "";
+    } catch (e) {
+      setSourceMsg("无法读取配置：" + e.message, false);
+    }
+  }
+  async function saveSource(source) {
+    sState.disabled = sReset.disabled = true;
+    setSourceMsg("校验中…", true);
+    try {
+      const r = await fetch(apiUrl("/api/devtools-source"), fetchOpts({
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+      }));
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || ("HTTP " + r.status));
+      setSourceMsg("✓ 已生效（按需重建缓存）", true);
+      await refreshSource();
+    } catch (e) {
+      setSourceMsg("✗ " + e.message, false);
+    } finally {
+      sState.disabled = sReset.disabled = false;
+    }
+  }
+  sState.addEventListener("click", () => {
+    const v = sInput.value.trim();
+    if (!v) return setSourceMsg("请输入源地址（http(s) URL 或本地路径），或点「恢复默认」", false);
+    saveSource(v);
+  });
+  sReset.addEventListener("click", () => saveSource(""));
+
+  // --- 模块显隐 ---
+  function renderToggles() {
+    const box = $("moduleToggles");
+    box.innerHTML = MODULES.map((m) => `
+      <div class="toggle-row">
+        <span class="tg-label">${m.label}</span>
+        <label class="toggle">
+          <input type="checkbox" data-key="${m.key}" ${moduleVis[m.key] ? "checked" : ""} />
+          <span class="slider"></span>
+        </label>
+      </div>`).join("");
+    box.querySelectorAll("input[data-key]").forEach((inp) => {
+      inp.addEventListener("change", () => {
+        moduleVis[inp.dataset.key] = inp.checked;
+        try { localStorage.setItem(LS_MODULES, JSON.stringify(moduleVis)); } catch (e) {}
+        applyModuleVis();
+      });
+    });
+  }
+
+  // 打开控制面板时刷新各配置
+  window.__onModalOpen = (window.__onModalOpen || function () {});
+  const _origOnModalOpen = window.__onModalOpen;
+  window.__onModalOpen = function (id) {
+    _origOnModalOpen(id);
+    if (id === "modCfg") {
+      refreshBackend();
+      refreshSource();
+      renderToggles();
+    }
+  };
+})();
+
+/* =====================================================================
+ * 模块：剪贴板同步（Mac ⇄ 手机自动双向同步，基于 adb-clip）
+ * ===================================================================== */
+let clipItems = [];
+function setClipMsg(text, ok) { setMsg($("clipMsg"), text, ok); }
+function renderClipHistory() {
+  const el = $("clipHist");
+  if (!clipItems.length) {
+    el.innerHTML = '<div class="hint" style="text-align:center;">暂无同步记录</div>';
+    return;
+  }
+  el.innerHTML = clipItems.map((it, i) => `
+    <div class="clip-item">
+      <span class="dir ${it.direction === "mac" ? "mac" : "phone"}">${it.direction === "mac" ? "Mac" : "手机"}</span>
+      <span class="content" title="${escapeHtml(it.content)}">${escapeHtml(it.content)}</span>
+      <span class="time">${it.time}</span>
+      <button class="ghost btn-copy" data-i="${i}">复制</button>
+    </div>`).join("");
+}
+async function refreshClipStatus() {
+  try {
+    const r = await api("/api/clipboard/status");
+    const statusEl = $("clipStatus");
+    if (r.installing) {
+      statusEl.textContent = "⏳ 正在自动安装 adb-clip 到手机…";
+    } else if (r.installed) {
+      statusEl.textContent = r.syncing
+        ? `● 双向同步中（每 ${r.interval}s 检测）`
+        : "● 同步暂停（详见下方提示）";
+    } else {
+      statusEl.textContent = "✕ clip 未安装，双向同步未开启";
+    }
+    $("btnClipInstall").hidden = r.installed || r.installing;
+    if (r.error) setClipMsg("⚠ " + r.error, false);
+    else if (r.installed) setClipMsg("", true);
+    return r;
+  } catch (e) {
+    setClipMsg("✗ " + e.message, false);
+    return null;
+  }
+}
+async function refreshClipHistory() {
+  try {
+    const r = await api("/api/clipboard/history");
+    clipItems = r.items || [];
+    renderClipHistory();
+  } catch (e) {}
+}
+$("clipHist").addEventListener("click", async (e) => {
+  const copyBtn = e.target.closest(".btn-copy");
+  if (!copyBtn) return;
+  const item = clipItems[Number(copyBtn.dataset.i)];
+  if (!item) return;
+  try {
+    await navigator.clipboard.writeText(item.content);
+    setClipMsg(`✓ 已复制到 Mac 剪贴板（${item.content.length} 字）`, true);
+    copyBtn.textContent = "已复制";
+    setTimeout(() => { copyBtn.textContent = "复制"; }, 1500);
+  } catch (err) {
+    setClipMsg("✗ 复制失败：" + err.message, false);
+  }
+});
+$("btnClipInstall").onclick = async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "安装中…";
+  try {
+    const r = await api("/api/clipboard/install", { method: "POST" });
+    setClipMsg("✓ " + r.message, true);
+    await refreshClipStatus();
+  } catch (err) {
+    setClipMsg("✗ 安装失败：" + err.message, false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "安装到手机";
+  }
+};
+let lastHistLen = -1;
+async function pollClipboard() {
+  const st = await refreshClipStatus();
+  if (st && st.history !== lastHistLen) {
+    lastHistLen = st.history;
+    await refreshClipHistory();
+  }
+}
+setInterval(pollClipboard, 3000);
+pollClipboard();
+
+/* =====================================================================
+ * 模块：文件推送 + APK 安装（拖拽 / 点击选择，XHR 上传带进度）
+ * ===================================================================== */
+const transfers = new Map();
+function fmtSize(n) {
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+  return n + " B";
+}
+function renderTransfer(listEl, items) {
+  if (!items.length) { listEl.innerHTML = ""; return; }
+  listEl.innerHTML = items.map((t) => {
+    const stateCls = t.state === "ok" ? "ok" : t.state === "err" ? "err" : "";
+    const stateTxt = t.state === "uploading" ? `上传中 ${t.pct}%`
+      : t.state === "pushing" ? "发送到手机…"
+      : t.state === "ok" ? "✓ " + t.msg : "✗ " + t.msg;
+    return `
+    <div class="transfer-item">
+      <span class="tf-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+      <span class="tf-prog">${fmtSize(t.size)}</span>
+      <span class="tf-state ${stateCls}">${stateTxt}</span>
+    </div>
+    ${t.state === "uploading" ? `<div class="transfer-bar"><div style="width:${t.pct}%"></div></div>` : ""}`;
+  }).join("");
+}
+function uploadXHR(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", apiUrlDev(url));
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round(e.loaded / e.total * 100));
+    };
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300 && data && !data.error) resolve(data);
+      else reject(new Error((data && data.error) || `HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("网络错误"));
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    xhr.send(fd);
+  });
+}
+async function transferFile(file, type) {
+  const listEl = type === "apk" ? $("apkList") : $("fileList");
+  const msgEl = type === "apk" ? $("apkMsg") : $("fileMsg");
+  const id = Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+  const item = { name: file.name, size: file.size, state: "uploading", pct: 0, msg: "" };
+  transfers.set(id, item);
+  renderTransfer(listEl, [...transfers.values()]);
+  try {
+    if (type === "apk" && !file.name.toLowerCase().endsWith(".apk")) {
+      throw new Error("请选择 .apk 文件");
+    }
+    const url = type === "apk" ? "/api/apk/install" : "/api/files/push";
+    item.state = "pushing";
+    renderTransfer(listEl, [...transfers.values()]);
+    const r = await uploadXHR(url, file, (pct) => {
+      item.pct = pct;
+      renderTransfer(listEl, [...transfers.values()]);
+    });
+    item.state = "ok";
+    item.msg = type === "apk" ? "安装成功" : `已到 ${r.remote}`;
+    setMsg(msgEl, type === "apk" ? `✓ ${file.name} 安装成功` : `✓ ${file.name} 已推送到手机`, true);
+  } catch (err) {
+    item.state = "err";
+    item.msg = err.message;
+    setMsg(msgEl, "✗ " + err.message, false);
+  }
+  renderTransfer(listEl, [...transfers.values()]);
+  const arr = [...transfers.entries()];
+  if (arr.length > 5) {
+    for (const [k] of arr.slice(0, arr.length - 5)) transfers.delete(k);
+  }
+}
+function bindDropZone(dzEl, inputEl, type) {
+  dzEl.addEventListener("click", () => inputEl.click());
+  inputEl.addEventListener("change", () => {
+    for (const f of [...inputEl.files]) transferFile(f, type);
+    inputEl.value = "";
+  });
+  ["dragenter", "dragover"].forEach((ev) => dzEl.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dzEl.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach((ev) => dzEl.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dzEl.classList.remove("dragover");
+  }));
+  dzEl.addEventListener("drop", (e) => {
+    const files = [...(e.dataTransfer.files || [])];
+    if (!files.length) return;
+    for (const f of files) transferFile(f, type);
+  });
+}
+bindDropZone($("fileDrop"), $("fileInput"), "push");
+bindDropZone($("apkDrop"), $("apkInput"), "apk");
+
+/* =====================================================================
+ * 模块：释放端口
+ * ===================================================================== */
+const PRESET_PORTS = [5173, 5174, 5175, 8080, 8081];
+$("portGrid").innerHTML = PRESET_PORTS
+  .map((p) => `<button class="ghost port-btn" data-port="${p}">${p}</button>`)
+  .join("");
+async function killPort(port, btn) {
+  port = String(port).trim();
+  if (!port) return setMsg($("portMsg"), "请输入端口", false);
+  if (btn) btn.disabled = true;
+  setMsg($("portMsg"), `正在释放 ${port} …`, true);
+  try {
+    const r = await api("/api/kill-port", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ port: Number(port) }),
+    });
+    if (r.killed && r.killed.length) {
+      const names = r.killed.map((k) => `${k.name}(${k.pid})`).join("、");
+      setMsg($("portMsg"), `✓ 端口 ${port} 已释放：${names}`, true);
+    } else {
+      setMsg($("portMsg"), `· 端口 ${port} 未被占用`, true);
+    }
+  } catch (e) {
+    setMsg($("portMsg"), "✗ " + e.message, false);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+$("portGrid").addEventListener("click", (e) => {
+  const b = e.target.closest(".port-btn");
+  if (b) killPort(b.dataset.port, b);
+});
+$("btnKillCustom").onclick = () => killPort($("portCustom").value, $("btnKillCustom"));
+$("portCustom").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnKillCustom").click(); });
+
+/* =====================================================================
+ * 模块：Claude 节点延迟测试
+ * ===================================================================== */
+const claudeHistory = [];
+function claudeRateOf(ms) {
+  if (ms == null) return { cls: "err", tag: "失败" };
+  if (ms < 600) return { cls: "ok", tag: "优" };
+  if (ms < 1500) return { cls: "warn", tag: "一般" };
+  return { cls: "err", tag: "差" };
+}
+function renderClaudeHist() {
+  const box = $("claudeHist");
+  if (!claudeHistory.length) { box.innerHTML = ""; return; }
+  box.innerHTML = claudeHistory.map((h, i) =>
+    `<div class="hist-item"><span class="ht">${h.ts}</span>` +
+    `<span class="hv">TCP ${h.tcp} / HTTPS ${h.https} ms</span>` +
+    `<span class="hd" data-i="${i}" title="删除">✕</span></div>`
+  ).join("");
+}
+async function testClaudeLatency() {
+  const btn = $("btnClaudeTest");
+  btn.disabled = true;
+  const rate = $("claudeRate");
+  rate.className = "claude-rate run";
+  rate.textContent = "测试中…";
+  $("claudeProxy").textContent = "";
+  $("claudeMetrics").textContent = "";
+  try {
+    const r = await (await fetch(apiUrl("/api/claude-latency"), fetchOpts())).json();
+    const httpsP50 = r.https ? r.https.p50 : null;
+    if (!r.ok || httpsP50 == null) {
+      rate.className = "claude-rate err";
+      rate.textContent = "✕ 失败";
+      $("claudeProxy").textContent = (r.proxy || "") + (r.ts ? "  ·  " + r.ts : "");
+      $("claudeMetrics").textContent = "无法连接到 api.anthropic.com（可能被墙或代理不通）";
+      return;
+    }
+    const rt = claudeRateOf(httpsP50);
+    rate.className = "claude-rate " + rt.cls;
+    rate.textContent = httpsP50 + " ms";
+    $("claudeProxy").textContent =
+      "代理: " + (r.proxy || "直连") + "  ·  " + r.ts + "  ·  评级 " + rt.tag;
+    const tcp = r.tcp ? `min ${r.tcp.min} / p50 ${r.tcp.p50} / max ${r.tcp.max}` : "—";
+    const https = r.https
+      ? `min ${r.https.min} / p50 ${r.https.p50} / p90 ${r.https.p90} / max ${r.https.max} (n=${r.https.n})`
+      : "—";
+    $("claudeMetrics").innerHTML =
+      `<div><b>TCP 直连</b>  ${tcp} ms</div>` +
+      `<div><b>HTTPS 经代理</b>  ${https} ms</div>`;
+    claudeHistory.unshift({ ts: r.ts, tcp: r.tcp ? r.tcp.p50 : "—", https: httpsP50 });
+    if (claudeHistory.length > 8) claudeHistory.pop();
+    renderClaudeHist();
+  } catch (e) {
+    rate.className = "claude-rate err";
+    rate.textContent = "✕ 出错";
+    $("claudeMetrics").textContent = String(e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+$("btnClaudeTest").onclick = testClaudeLatency;
+$("btnClaudeClear").onclick = () => { claudeHistory.length = 0; renderClaudeHist(); };
+$("claudeHist").addEventListener("click", (e) => {
+  const d = e.target.closest(".hd");
+  if (d) { claudeHistory.splice(+d.dataset.i, 1); renderClaudeHist(); }
+});
+
+/* =====================================================================
+ * 模块：屏幕镜像（Android scrcpy + iOS pmd3 统一，按设备平台自动切换）
+ * ===================================================================== */
+function currentPlatform() {
+  return String(device || "").startsWith("ios") ? "ios" : "android";
+}
+
+/* ---------- Android 分支：scrcpy / PNG 镜像 + 点击滑动 ---------- */
+const screenEl = $("screen");
+const screenEmpty = $("screenEmpty");
+const canvasEl = $("scrcpyCanvas");
+const scrcpyCtx = canvasEl.getContext("2d");
+let living = false, liveTimer = null, curObjUrl = null, lastBlob = null;
+const FPS = 3, INTERVAL = 1000 / FPS;
+const HAS_WC = !!(window.VideoDecoder && window.VideoFrame && window.EncodedVideoChunk);
+let engine = null, videoSize = { w: 0, h: 0 };
+let scrcpyPlayer = null, scrcpyFrameCount = 0, scrcpyFpsTimer = null;
+let lastPngBlob = null;
+
+async function grabScreenshot() {
+  const res = await fetch(apiUrlDev("/api/screenshot?t=" + Date.now()), fetchOpts());
+  if (!res.ok) throw new Error("截图失败 HTTP " + res.status);
+  return await res.blob();
+}
+async function copyBlobToClipboard(blob) {
+  if (!navigator.clipboard || !window.ClipboardItem) throw new Error("当前浏览器不支持图片剪贴板");
+  await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+}
+function showFrame(blob) {
+  lastBlob = blob;
+  const url = URL.createObjectURL(blob);
+  screenEl.onload = () => { if (curObjUrl) URL.revokeObjectURL(curObjUrl); curObjUrl = url; };
+  screenEl.src = url;
+  screenEl.style.display = "block";
+  screenEmpty.style.display = "none";
+}
+async function refreshFrameQuiet() {
+  try { showFrame(await grabScreenshot()); } catch (e) {}
+}
+function activeSurface() {
+  return (engine === "scrcpy" && canvasEl.style.display !== "none") ? canvasEl : screenEl;
+}
+function activeIntrinsic() {
+  if (engine === "scrcpy") return videoSize;
+  return { w: screenEl.naturalWidth, h: screenEl.naturalHeight };
+}
+function toDeviceCoords(clientX, clientY) {
+  const el = activeSurface();
+  const rect = el.getBoundingClientRect();
+  const intr = activeIntrinsic();
+  const nx = (clientX - rect.left) / rect.width;
+  const ny = (clientY - rect.top) / rect.height;
+  return { x: Math.round(nx * (intr.w || 1)), y: Math.round(ny * (intr.h || 1)) };
+}
+
+function createScrcpyPlayer(canvasTarget, ctx) {
+  let decoder = null, reader = null;
+  let sps = null, pps = null, configured = false;
+  let ts = 0;
+  let buf = new Uint8Array(0);
+  const concat = (a, b) => { const n = new Uint8Array(a.length + b.length); n.set(a, 0); n.set(b, a.length); return n; };
+  function findSC(b, from) {
+    for (let i = from; i + 3 < b.length; i++) {
+      if (b[i] === 0 && b[i + 1] === 0) {
+        if (b[i + 2] === 1) return { start: i, end: i + 3 };
+        if (b[i + 2] === 0 && b[i + 3] === 1) return { start: i, end: i + 4 };
+      }
+    }
+    return null;
+  }
+  function buildAvcC(sps, pps) {
+    const d = new Uint8Array(11 + sps.length + pps.length);
+    let o = 0;
+    d[o++] = 0x01; d[o++] = sps[1]; d[o++] = sps[2]; d[o++] = sps[3]; d[o++] = 0xFF; d[o++] = 0xE1;
+    d[o++] = (sps.length >> 8) & 0xff; d[o++] = sps.length & 0xff; d.set(sps, o); o += sps.length;
+    d[o++] = 0x01; d[o++] = (pps.length >> 8) & 0xff; d[o++] = pps.length & 0xff; d.set(pps, o); o += pps.length;
+    return d;
+  }
+  function codecOf(sps) {
+    return "avc1." + sps[1].toString(16).padStart(2, "0") + sps[2].toString(16).padStart(2, "0") + sps[3].toString(16).padStart(2, "0");
+  }
+  function feedNal(nalType, nal) {
+    if (!configured || !decoder) return;
+    const out = new Uint8Array(4 + nal.length);
+    out[0] = (nal.length >> 24) & 0xff; out[1] = (nal.length >> 16) & 0xff;
+    out[2] = (nal.length >> 8) & 0xff; out[3] = nal.length & 0xff;
+    out.set(nal, 4);
+    ts += 40000;
+    const type = (nalType === 5 || nalType === 7 || nalType === 8) ? "key" : "delta";
+    try { decoder.decode(new EncodedVideoChunk({ type, timestamp: ts, data: out })); }
+    catch (e) { console.warn("[scrcpy] decode chunk err", e); }
+  }
+  function onNal(nal) {
+    const nalType = nal[0] & 0x1f;
+    if (nalType === 7) sps = nal;
+    else if (nalType === 8) pps = nal;
+    if (!configured && sps && pps) {
+      const desc = buildAvcC(sps, pps);
+      const codec = codecOf(sps);
+      decoder = new VideoDecoder({
+        output: (frame) => {
+          if (!videoSize.w) videoSize = { w: frame.displayWidth, h: frame.displayHeight };
+          if (canvasTarget.width !== frame.displayWidth || canvasTarget.height !== frame.displayHeight) {
+            canvasTarget.width = frame.displayWidth; canvasTarget.height = frame.displayHeight;
+          }
+          ctx.drawImage(frame, 0, 0);
+          scrcpyFrameCount++;
+          frame.close();
+        },
+        error: (e) => console.error("[scrcpy] decoder error", e),
+      });
+      decoder.configure({ codec, description: desc, optimizeForLatency: true });
+      configured = true;
+      videoSize = { w: 0, h: 0 };
+    }
+    feedNal(nalType, nal);
+  }
+  function ingest(data) {
+    buf = concat(buf, new Uint8Array(data));
+    let pos = 0;
+    while (true) {
+      const sc = findSC(buf, pos);
+      if (!sc) break;
+      const start = sc.end;
+      const next = findSC(buf, start);
+      if (!next) break;
+      onNal(buf.slice(start, next.start));
+      pos = next.start;
+    }
+    if (pos > 0) buf = buf.slice(pos);
+  }
+  async function start() {
+    const res = await fetch(apiUrlDev("/api/stream"), fetchOpts());
+    if (!res.ok || !res.body) throw new Error("视频流不可用（scrcpy 未启动？）");
+    reader = res.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.byteLength) ingest(value);
+      }
+    } finally {
+      stop();
+    }
+    if (living && engine === "scrcpy") {
+      $("fpsLabel").textContent = "✗ scrcpy 流中断，已降级到 PNG 镜像";
+      startLegacyEngine();
+    }
+  }
+  function stop() {
+    try { if (reader) reader.cancel(); } catch (e) {}
+    try { if (decoder && decoder.state !== "closed") decoder.close(); } catch (e) {}
+    decoder = null; configured = false; sps = null; pps = null; buf = new Uint8Array(0);
+  }
+  return { start, stop };
+}
+function startScrcpyEngine() {
+  engine = "scrcpy";
+  canvasEl.style.display = "block";
+  screenEl.style.display = "none";
+  screenEmpty.style.display = "none";
+  videoSize = { w: 0, h: 0 };
+  scrcpyFrameCount = 0;
+  scrcpyPlayer = createScrcpyPlayer(canvasEl, scrcpyCtx);
+  scrcpyPlayer.start().catch((e) => {
+    console.error("[scrcpy] start failed", e);
+    $("fpsLabel").textContent = "✗ scrcpy 启动失败，已降级到 PNG 镜像";
+    if (living) startLegacyEngine();
+  });
+  scrcpyFpsTimer = setInterval(() => {
+    $("fpsLabel").textContent = `scrcpy 实时 · ${scrcpyFrameCount}fps`;
+    scrcpyFrameCount = 0;
+  }, 1000);
+}
+function startLegacyEngine() {
+  engine = "legacy";
+  screenEl.style.display = "block";
+  canvasEl.style.display = "none";
+  screenEmpty.style.display = "none";
+  liveLoop();
+}
+async function liveLoop() {
+  if (!living || engine !== "legacy") return;
+  const t0 = performance.now();
+  try {
+    const blob = await grabScreenshot();
+    if (!living) return;
+    showFrame(blob);
+    const dt = performance.now() - t0;
+    $("fpsLabel").textContent = `实时 · ${Math.min(FPS, Math.round(1000 / Math.max(dt, INTERVAL)))}fps`;
+  } catch (e) {
+    $("fpsLabel").textContent = "✗ " + e.message;
+  }
+  const elapsed = performance.now() - t0;
+  liveTimer = setTimeout(liveLoop, Math.max(0, INTERVAL - elapsed));
+}
+function stopLiveAndroid() {
+  if (engine === "scrcpy" && scrcpyPlayer) { scrcpyPlayer.stop(); scrcpyPlayer = null; }
+  if (engine === "legacy") clearTimeout(liveTimer);
+  if (scrcpyFpsTimer) { clearInterval(scrcpyFpsTimer); scrcpyFpsTimer = null; }
+  engine = null;
+  living = false;
+  $("btnLive").textContent = "▶ 开始镜像";
+  $("fpsLabel").textContent = "";
+}
+$("btnLive").onclick = () => {
+  living = !living;
+  $("btnLive").textContent = living ? "⏸ 停止镜像" : "▶ 开始镜像";
+  if (living) {
+    if (HAS_WC) startScrcpyEngine();
+    else startLegacyEngine();
+  } else {
+    stopLiveAndroid();
+  }
+};
+$("btnShot").onclick = async () => {
+  $("btnShot").disabled = true;
+  setMsg($("shotMsg"), "截图中…", true);
+  try {
+    const blob = await grabScreenshot();
+    lastPngBlob = blob;
+    $("btnShotDl").disabled = false;
+    try {
+      await copyBlobToClipboard(blob);
+      setMsg($("shotMsg"), "✓ 已截图并复制到剪贴板", true);
+    } catch (e) {
+      setMsg($("shotMsg"), "✓ 已截图（复制失败：" + e.message + "）", false);
+    }
+  } catch (e) {
+    setMsg($("shotMsg"), "✗ " + e.message, false);
+  } finally {
+    $("btnShot").disabled = false;
+  }
+};
+$("btnShotDl").onclick = () => {
+  if (!lastPngBlob) return;
+  const url = URL.createObjectURL(lastPngBlob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "screenshot-" + Date.now() + ".png";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+function flashTap(clientX, clientY) {
+  const frameRect = $("screenFrame").getBoundingClientRect();
+  const mark = $("tapMark");
+  mark.style.left = (clientX - frameRect.left) + "px";
+  mark.style.top = (clientY - frameRect.top) + "px";
+  mark.style.opacity = "1";
+  setTimeout(() => { mark.style.opacity = "0"; }, 250);
+}
+let down = null;
+$("screenFrame").addEventListener("mousedown", (e) => {
+  down = { x: e.clientX, y: e.clientY, t: performance.now() };
+});
+$("screenFrame").addEventListener("mouseup", async (e) => {
+  if (!down) return;
+  const dx = e.clientX - down.x, dy = e.clientY - down.y;
+  const dist = Math.hypot(dx, dy);
+  flashTap(e.clientX, e.clientY);
+  try {
+    if (dist < 8) {
+      const p = toDeviceCoords(e.clientX, e.clientY);
+      await api("/api/tap", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+    } else {
+      const a = toDeviceCoords(down.x, down.y);
+      const b = toDeviceCoords(e.clientX, e.clientY);
+      const dur = Math.min(800, Math.max(120, Math.round(performance.now() - down.t)));
+      await api("/api/swipe", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, dur }),
+      });
+    }
+    if (engine === "legacy") setTimeout(refreshFrameQuiet, 100);
+  } catch (err) {
+    console.error(err);
+  }
+  down = null;
+});
+$("screenFrame").addEventListener("dragstart", (e) => e.preventDefault());
+async function sendKey(code) {
+  try { await api("/api/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) }); }
+  catch (e) { console.error(e); }
+}
+$("btnBack").onclick = () => sendKey(4);
+$("btnHome").onclick = () => sendKey(3);
+
+/* ---------- iOS 分支：pmd3 serve-web viewer ---------- */
+let _mirrorTimer = null, _mirrorBusy = false;
+function _iosSetState(text, cls) {
+  const s = $("iosMirrorState");
+  if (s) { s.textContent = text; s.className = "m-state" + (cls ? " " + cls : ""); }
+}
+function _iosMsg(html, isErr) {
+  const m = $("iosMirrorMsg");
+  m.hidden = !html;
+  m.innerHTML = html || "";
+  m.className = "mirror-msg" + (isErr ? " err" : "");
+}
+function _iosClearPoll() { if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; } }
+async function _iosApi(method, path) {
+  const r = await fetch(apiUrlDev(path), fetchOpts({ method }));
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || data.error) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+async function refreshIosMirrorState() {
+  if (currentPlatform() !== "ios") return;
+  const st = $("iosMirrorState"), stopBtn = $("iosMirrorStop");
+  let s = null;
+  try { s = await (await fetch(apiUrlDev("/api/ios/mirror/status"), fetchOpts())).json(); } catch (e) { return; }
+  if (!s || !s.tool) return;
+  if (s.running) {
+    st.textContent = "● 镜像运行中";
+    st.className = "m-state ok";
+    stopBtn.hidden = false;
+  } else {
+    stopBtn.hidden = true;
+    st.textContent = s.starting ? "启动中…" : (s.error ? "启动失败" : "");
+    st.className = "m-state" + (s.error ? " err" : "");
+  }
+}
+async function iosMirrorStart() {
+  if (_mirrorBusy) return;
+  _mirrorBusy = true;
+  _iosSetState("连接中…");
+  _iosMsg("", false);
+  $("iosMirrorFrame").src = "about:blank";
+  try {
+    await _iosApi("POST", "/api/ios/mirror/start");
+  } catch (e) {
+    _mirrorBusy = false;
+    _iosSetState("失败", "err");
+    _iosMsg(escapeHtml("启动请求失败：" + e.message), true);
+    return;
+  }
+  const began = Date.now();
+  const poll = async () => {
+    try {
+      const s = await (await fetch(apiUrlDev("/api/ios/mirror/status"), fetchOpts())).json();
+      if (s.capable === false) {
+        _mirrorBusy = false;
+        _iosSetState("设备不支持", "err");
+        _iosMsg(escapeHtml(s.capability_hint || "设备未注册屏幕流服务（displayservice）")
+          + "（详细日志：<code>ios-mirror.log</code>）", true);
+        try { await _iosApi("POST", "/api/ios/mirror/stop"); } catch (e) {}
+        refreshIosMirrorState();
+        return;
+      }
+      if (s.capable === null) {
+        if (Date.now() - began > 100000) {
+          _mirrorBusy = false;
+          _iosSetState("超时", "err");
+          _iosMsg("等待镜像就绪超时（100s）。查看后端日志 <code>ios-mirror.log</code>；确认 iPhone 亮屏解锁、开发者模式已开启。", true);
+          return;
+        }
+        _iosSetState("探测屏幕能力…");
+        _mirrorTimer = setTimeout(poll, 1000);
+        return;
+      }
+      if (s.running) {
+        _mirrorBusy = false;
+        _iosSetState("已连接", "ok");
+        _iosMsg("", false);
+        $("iosMirrorFrame").src = s.url;
+        refreshIosMirrorState();
+        return;
+      }
+      if (Date.now() - began > 100000) {
+        _mirrorBusy = false;
+        _iosSetState("超时", "err");
+        _iosMsg("等待镜像就绪超时（100s）。查看后端日志 <code>ios-mirror.log</code>；确认 iPhone 亮屏解锁、开发者模式已开启。", true);
+        return;
+      }
+      _iosSetState(s.starting ? "启动中…" : "就绪中…");
+      _mirrorTimer = setTimeout(poll, 1000);
+    } catch (e) {
+      _mirrorBusy = false;
+      _iosSetState("失败", "err");
+      _iosMsg(escapeHtml("状态查询失败：" + e.message), true);
+    }
+  };
+  poll();
+}
+async function stopIosMirror() {
+  _iosClearPoll(); _mirrorBusy = false;
+  try { await _iosApi("POST", "/api/ios/mirror/stop"); } catch (e) {}
+  $("iosMirrorFrame").src = "about:blank";
+  const st = $("iosMirrorState");
+  if (st) { st.textContent = ""; st.className = "m-state"; }
+  const stopBtn = $("iosMirrorStop");
+  if (stopBtn) stopBtn.hidden = true;
+}
+$("iosMirrorOpen").addEventListener("click", async () => {
+  try {
+    const s = await (await fetch(apiUrlDev("/api/ios/mirror/status"), fetchOpts())).json();
+    if (s.running) {
+      _iosSetState("已连接", "ok");
+      _iosMsg("", false);
+      $("iosMirrorFrame").src = s.url;
+      refreshIosMirrorState();
+    } else iosMirrorStart();
+  } catch (e) { iosMirrorStart(); }
+});
+$("iosMirrorStop").addEventListener("click", stopIosMirror);
+
+/* ---------- 平台切换：打开弹窗 / 切换设备时同步分支 ---------- */
+function applyMirrorPlatform() {
+  const isIos = currentPlatform() === "ios";
+  const androidBox = $("mirrorAndroid");
+  const iosBox = $("mirrorIos");
+  const tag = $("mirrorPlatformTag");
+  if (isIos) {
+    androidBox.style.display = "none";
+    iosBox.hidden = false;
+    iosBox.style.display = "flex";
+    tag.textContent = "iOS";
+    tag.className = "mp-tag ios";
+    stopLiveAndroid();
+    refreshIosMirrorState();
+  } else {
+    iosBox.hidden = true;
+    iosBox.style.display = "none";
+    androidBox.style.display = "flex";
+    tag.textContent = "Android";
+    tag.className = "mp-tag android";
+    stopIosMirror();
+  }
+}
+// 打开镜像弹窗时按当前设备渲染对应分支
+const _origOnModalOpen2 = window.__onModalOpen;
+window.__onModalOpen = function (id) {
+  if (_origOnModalOpen2) _origOnModalOpen2(id);
+  if (id === "modMirror") applyMirrorPlatform();
+};
+// 设备切换时，若镜像弹窗开着则同步分支
+const _origOnDeviceChange = window.__onDeviceChange;
+window.__onDeviceChange = function () {
+  if (_origOnDeviceChange) _origOnDeviceChange();
+  const mirrorModal = $("modMirror");
+  if (mirrorModal && !mirrorModal.hidden) applyMirrorPlatform();
+};
+</script>
 </body>
 </html>

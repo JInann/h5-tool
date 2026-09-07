@@ -8,12 +8,9 @@ window.H5TOOL_CONFIG = {
   backend: "http://127.0.0.1:12787",
   // DevTools 前端（inspector.html）入口。留空 = 自动判断（推荐，本机/部署版都正确）：
   //   - 页面在本机打开（host 为 127.0.0.1/localhost）→ 同源 /devtools/inspector.html（h5-tool 自带 front_end）
-  //   - 页面在服务器部署版打开（如 CloudBase）→ 同源 /front_end/inspector.html（与 devtools.html 一起部署）
-  // 注意 DevTools 前端必须与 devtools.html 同源同协议：iframe 跨源加载 https 前端时，
+  //   - 页面在服务器部署版打开（如 CloudBase）→ 同源 /front_end/inspector.html（front_end 与页面同根部署）
+  // 注意 DevTools 前端必须与本页面同源同协议：iframe 跨源加载 https 前端时，
   // 内部 ws://127.0.0.1 会被浏览器当第三方 mixed content 拦截（报「调试连接已关闭」）。
   // 如确有需要（前后端分离/自定义 CDN），可填完整 URL 或同域路径强制指定。
   devtoolsPanel: "",
-  // iOS 屏幕镜像入口：false（默认）= 隐藏（入口与提示不显示，功能代码保留）；
-  // true = 在 iOS 真机分区显示「📺 屏幕镜像 + 点击滑动」入口。
-  iosMirror: false,
 };

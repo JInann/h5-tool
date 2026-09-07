@@ -17,25 +17,31 @@
 
 ## 能力
 
-1. **发送 H5 链接到手机** — 让手机当前 WebView 导航到指定地址（CDP `Page.navigate`）。
+页面统一为**单一入口 `index.html`**：左侧是 WebView 调试目标列表 + 右侧 DevTools 面板；左下角一排
+**悬浮功能按钮**（📋 剪贴板 / 📁 文件推送 / 📦 APK 安装 / 📺 屏幕镜像 / 🔌 释放端口 / 🧪 Claude 延迟 /
+⚙ 控制面板），每个按钮可**独立拖动**、点击弹出对应弹窗（可拖动缩放）；控制面板里可改后端地址、
+DevTools 面板源，并控制各功能按钮的显隐。
+
+1. **发送 H5 链接到手机** — 左侧「快捷修改地址」让手机当前 WebView 导航到指定地址（CDP `Page.navigate`）。
 2. **截图** — ADB 截取整屏，可下载 PNG。
 3. **执行 JS 并获取返回值** — 在页面上下文执行任意 JS（CDP `Runtime.evaluate`，自动 await Promise）。
-4. **实时屏幕镜像 + 模拟点击** — 支持 WebCodecs 的浏览器走 **scrcpy 硬件编码 + WebCodecs 解码**
-   （30–60fps、低延迟，画到 `<canvas>`）；不支持时降级为 ADB 截图轮询（~3fps）。在画面上点击 =
-   真机点击（`input tap`），拖动 = 滑动（`input swipe`），并提供「返回 / 主页」按键。
-5. **WebView 调试（完整 Chrome DevTools）** — 复用 Chromium 开源的 devtools-frontend，浏览器内
-   直接使用 Console / Sources 断点 / Network / Storage / Elements 全套调试能力调试手机 WebView。
-   控制台右上角「🛠 调试」进入，选择目标后 iframe 内嵌 DevTools（也可新窗口打开）。
-6. **iOS Safari / App WebView 调试 + 屏幕镜像（真机）** — `pymobiledevice3` 的 `webinspector cdp`
-   （WIR → CDP 翻译）与 `core-device display serve-web`（屏幕镜像 + 触摸控制）均由 `ios_bridge.py`
-   管理生命周期：Web 调试桥端口 9322+slot；屏幕镜像独立懒启动（端口 12790+slot，viewer 内嵌
-   iframe，点画面 = 点击、拖动 = 滑动，自带 Home / 旋转 / 截屏 / 剪贴板）。设备 tab 选 iOS 真机
-   即可调试 Safari / App 内 WKWebView；屏幕镜像需 **iOS 27+**（Apple 随 iOS 27 DeviceHub 才向
+4. **实时屏幕镜像 + 模拟点击（Android / iOS）** — Android 走 **scrcpy 硬件编码 + WebCodecs 解码**
+   （30–60fps、低延迟，画到 `<canvas>`），不支持时降级为 ADB 截图轮询（~3fps）；iOS 真机（iOS 27+）
+   走 pymobiledevice3 的 serve-web viewer。在画面上点击 = 真机点击（`input tap`），拖动 = 滑动
+   （`input swipe`），并提供「返回 / 主页」按键。
+5. **WebView 调试（完整 Chrome DevTools）** — 复用 Chromium 开源的 devtools-frontend，页面左侧
+   直接列出所选设备 WebView 的调试目标，点「内嵌打开」在右侧 iframe 使用 Console / Sources 断点 /
+   Network / Storage / Elements 全套调试能力（也可「新窗口」独立打开）。
+6. **iOS Safari / App WebView 调试（真机）** — `pymobiledevice3` 的 `webinspector cdp`（WIR → CDP 翻译）
+   由 `ios_bridge.py` 管理生命周期（iOS 屏幕镜像已并入第 4 条「屏幕镜像」功能）。设备 tab 选 iOS 真机
+   即可调试 Safari / App 内 WKWebView；iOS 屏幕镜像需 **iOS 27+**（Apple 随 iOS 27 DeviceHub 才向
    开发者工具开放屏幕流服务 displayservice，pmd3 ≥9.18 跟进）——iOS 26 及更早实测不注册该服务，
    与机型无关（iPhone 11 / 14 Pro Max 均不行），界面会明确提示，Web 调试不受影响。
    **需要前置依赖 pymobiledevice3（推荐最新 11.x）**：`brew install pymobiledevice3` 或 `pipx install pymobiledevice3`
    （Windows 另需安装 iTunes / Apple Devices 提供 usbmuxd 驱动）。
-7. **MCP 接入（AI 使用）** — `mcp_server.py` 把后端 HTTP 接口封装成 MCP 工具，AI 客户端
+7. **释放端口** — 一键杀掉占用指定端口的进程（macOS `lsof` / Windows `netstat` + `taskkill`）。
+8. **Claude 节点延迟测试** — 测当前出口到 `api.anthropic.com` 的 TCP 直连 + HTTPS 经代理往返（无需 API Key）。
+9. **MCP 接入（AI 使用）** — `mcp_server.py` 把后端 HTTP 接口封装成 MCP 工具，AI 客户端
    （WorkBuddy 等）可直接截图看画面、点击/滑动/按键、发链接、执行 JS。
 
 ## 安装与使用（npm）
@@ -114,22 +120,21 @@ h5-tool start
 
 ```
 浏览器（使用者本机）
-  ├─ HTTPS ──▶ 服务器静态托管（index.html / app.js / devtools.html / config.js）
+  ├─ HTTPS ──▶ 服务器静态托管（index.html / devtools.html / config.js）
   └─ fetch / WebSocket ──▶ http://127.0.0.1:12787（后端，使用者本机；跨域 CORS + PNA 已内置）
                               └─ adb / CDP / scrcpy ──▶ 手机（USB 连接使用者本机）
 ```
 
 ## 部署前端到服务器（前后端分离）
 
-前端是纯静态的 4 个文件（就在 `web/` 目录，**无需打包、无需复制到 dist/**），可部署到任意静态托管 / nginx / 对象存储。
+前端是纯静态的 3 个文件（就在 `web/` 目录，**无需打包、无需复制到 dist/**），可部署到任意静态托管 / nginx / 对象存储。
 
-直接把 `web/` 下这 4 个文件上传到静态托管**根目录**（CloudBase 静态托管 / CloudStudio / 公司 nginx 均可）：
+直接把 `web/` 下这 3 个文件上传到静态托管**根目录**（CloudBase 静态托管 / CloudStudio / 公司 nginx 均可）：
 
 | 文件 | 说明 |
 |---|---|
-| `index.html` | 控制台主页面 |
-| `app.js` | 控制台逻辑（请求 `H5TOOL_CONFIG.backend`） |
-| `devtools.html` | WebView 调试面板入口 |
+| `index.html` | 控制台主页面（WebView 调试 + 悬浮功能按钮 + 控制面板，逻辑全内联） |
+| `devtools.html` | 兼容旧书签的跳转页（`location.replace('./index.html')`） |
 | `config.js` | 全局配置：`backend`（默认 `http://127.0.0.1:12787`）、`devtoolsPanel`（远程 DevTools 资源） |
 
 部署后使用者无需改任何配置：后端照常 `h5-tool start` 本地启动，浏览器打开服务器页面即用。
@@ -179,17 +184,16 @@ h5-tool start
 手机屏幕必须点亮且解锁，否则系统拒绝访问剪贴板。`--no-clip-sync` 可关闭自动同步。
 支持 macOS（pbcopy/pbpaste）与 Windows（PowerShell）。
 
-**文件推送 / APK 安装**：控制台「4 · 文件推送」拖拽或点击选择文件上传 → 后端 adb push
-到手机 `/sdcard/Download/h5-tool/`；「5 · APK 安装」拖拽/选择 `.apk` → `adb install -r`
+**文件推送 / APK 安装**：左下角悬浮按钮「📁 文件推送」拖拽或点击选择文件上传 → 后端 adb push
+到手机 `/sdcard/Download/h5-tool/`；「📦 APK 安装」拖拽/选择 `.apk` → `adb install -r`
 安装到手机（安装失败返回可读错误信息）。两个模块均支持多设备 `device` 参数，
 macOS / Windows 通用。
 
 ## WebView 调试（复用 Chrome DevTools）
 
-控制台右上角「🛠 调试」进入 `web/devtools.html`，顶部可选择设备，列出该设备 WebView
-的调试目标，点击「内嵌打开」在右侧 iframe 使用完整 DevTools
-（Console / Sources 断点 / Network / Storage / Elements），或「新窗口」独立打开。
-多台设备时多个浏览器标签各选一台即可并行调试。
+首页顶部可拖动的设备栏选择设备，左侧直接列出该设备 WebView 的调试目标，点击「内嵌打开」
+在右侧 iframe 使用完整 DevTools（Console / Sources 断点 / Network / Storage / Elements），
+或「新窗口」独立打开。多台设备时多个浏览器标签各选一台即可并行调试。
 
 工作原理：devtools-frontend（Chromium 开源前端）是纯 Web 应用，给它一个 CDP WebSocket 地址
 （`inspector.html?ws=...`）即可工作。因为 Android WebView（Chrome 111+ 内核）的 CDP server
@@ -253,5 +257,5 @@ H5_TOOL_URL=http://127.0.0.1:12999 python mcp_server.py
 
 - 镜像画面上的坐标会按图片真实分辨率换算为设备坐标，因此点击位置准确。
 - WebView 重建（PID 变化）时，CDP 会自动重连一次。
-- 若右上角 WebView 指示灯为红色，把鼠标悬停在上面可看到具体原因。
+- 左侧「手机 WebView」标题旁的圆点指示灯：绿色 = 有可调试目标，灰色 = 无目标或未开 WebView 调试。
 - 包体积 ~800KB（scrcpy-server 占大头），devtools-frontend（438MB）不入包，由远程面板替代。
