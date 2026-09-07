@@ -22,6 +22,7 @@ import queue
 import re
 import socket
 import statistics
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -102,15 +103,108 @@ class AccessLogger:
 
 access_log = AccessLogger()
 
-# devtools-frontend 静态资源（复用 Chrome DevTools UI）
-# DEVTOOLS_DIR 支持两种形态：
-#   - 本地目录：如 /path/to/front_end 或 devtools-local/front_end（默认）
-#   - 远程 URL：如 http://10.0.0.5:8080/devtools —— 反向代理拉取并本地缓存到
-#     devtools-local/.remote-cache/，前端仍统一走本地 /devtools/
-_DEVTOOLS_DIR_RAW = os.environ.get("DEVTOOLS_DIR") or str(Path(__file__).parent / "devtools-local" / "front_end")
-DEVTOOLS_REMOTE_BASE = _DEVTOOLS_DIR_RAW if _DEVTOOLS_DIR_RAW.startswith(("http://", "https://")) else None
-DEVTOOLS_DIR = Path(_DEVTOOLS_DIR_RAW) if not DEVTOOLS_REMOTE_BASE else None
+# devtools-frontend 静态资源（复用 Chrome DevTools UI），来源优先级：
+#   1. 页面配置（devtools.html ⚙ 设置面板 → devtools-source.json，热生效）
+#   2. 环境变量 DEVTOOLS_DIR（本地目录路径 或 http(s):// 远程 URL）
+#   3. 默认 CloudBase http 源（webapps.tcloudbase.com 支持明文 http，免证书配置）
+# 远程源按需拉取并落盘缓存到 devtools-local/.remote-cache/，换源自动清空旧缓存。
+DEFAULT_DEVTOOLS_SOURCE = "http://devtools-xhstudy-d1g9ap809fb38788a.webapps.tcloudbase.com/front_end"
+DEVTOOLS_SOURCE_FILE = Path(__file__).parent / "devtools-local" / "devtools-source.json"
 DEVTOOLS_CACHE = Path(__file__).parent / "devtools-local" / ".remote-cache"
+_source_lock = threading.Lock()
+# 配置文件读取缓存（2s TTL）：devtools 面板加载时并发资源请求多，避免每请求读盘
+_cfg_cache = {"t": 0.0, "raw": None}
+
+
+def _read_devtools_cfg():
+    """页面配置的源地址；未配置返回 None。带 2s TTL 缓存。"""
+    now = time.time()
+    if now - _cfg_cache["t"] < 2:
+        return _cfg_cache["raw"]
+    raw = None
+    try:
+        data = json.loads(DEVTOOLS_SOURCE_FILE.read_text())
+        raw = str(data.get("source") or "").strip() or None
+    except Exception:
+        raw = None
+    _cfg_cache["t"] = now
+    _cfg_cache["raw"] = raw
+    return raw
+
+
+def _write_devtools_cfg(source):
+    """保存/清除页面配置；source=None 删除配置文件（恢复默认）。"""
+    with _source_lock:
+        if source is None:
+            try:
+                DEVTOOLS_SOURCE_FILE.unlink()
+            except FileNotFoundError:
+                pass
+        else:
+            DEVTOOLS_SOURCE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            DEVTOOLS_SOURCE_FILE.write_text(json.dumps(
+                {"source": source, "updatedAt": time.strftime("%Y-%m-%d %H:%M:%S")},
+                ensure_ascii=False, indent=2))
+        _cfg_cache["raw"] = source
+        _cfg_cache["t"] = time.time()
+
+
+def _effective_devtools():
+    """返回 (remote_base|None, local_dir|None)：页面配置 > env DEVTOOLS_DIR > 默认源。"""
+    raw = _read_devtools_cfg() or os.environ.get("DEVTOOLS_DIR") or DEFAULT_DEVTOOLS_SOURCE
+    raw = str(raw).strip()
+    if raw.startswith(("http://", "https://")):
+        return raw.rstrip("/"), None
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = Path(__file__).parent / p
+    return None, p
+
+
+def _validate_devtools_source(source):
+    """保存前预检：http(s) URL 能拉到 inspector.html；本地路径存在 front_end 产物。"""
+    if source.startswith(("http://", "https://")):
+        url = f"{source.rstrip('/')}/inspector.html"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "h5-tool"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"远程 {resp.status}")
+        except Exception as e:
+            raise RuntimeError(f"拉取 {url} 失败：{e}")
+        return
+    p = Path(source).expanduser()
+    if not p.is_absolute():
+        p = Path(__file__).parent / p
+    if not p.is_dir():
+        raise RuntimeError(f"目录不存在：{p}")
+    if not (p / "inspector.html").is_file():
+        raise RuntimeError(f"{p} 下未找到 inspector.html（不是 front_end 产物目录？）")
+
+
+def _clear_devtools_cache():
+    """换源后旧缓存作废，整体清空（目录随用随建）。"""
+    with _source_lock:
+        if DEVTOOLS_CACHE.is_dir():
+            for child in DEVTOOLS_CACHE.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    try:
+                        child.unlink()
+                    except FileNotFoundError:
+                        pass
+
+
+def _devtools_cfg_status():
+    """给前端设置面板的状态：configured=自定义值 / default=默认 / effective=当前生效。"""
+    cfg = _read_devtools_cfg()
+    remote_base, local_dir = _effective_devtools()
+    return {
+        "configured": cfg,
+        "default": DEFAULT_DEVTOOLS_SOURCE,
+        "effective": remote_base or str(local_dir),
+    }
 
 _DEVTOOLS_MIME = {
     ".html": "text/html; charset=utf-8",
@@ -1130,22 +1224,23 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_devtools(self, rel):
         """托管 devtools-frontend 静态资源（inspector.html 及其 js/css/资源）。
 
-        支持本地目录（DEVTOOLS_DIR=本地路径）与远程反向代理（DEVTOOLS_DIR=http(s)://…）
-        两种形态；保持原始目录结构按相对路径 serve。
+        来源每次请求动态解析（页面配置 > env DEVTOOLS_DIR > 默认 CloudBase http 源），
+        支持本地目录与远程反向代理两种形态；保持原始目录结构按相对路径 serve。
         """
-        if DEVTOOLS_REMOTE_BASE:
-            return self._serve_devtools_remote(rel)
-        if DEVTOOLS_DIR is None or not DEVTOOLS_DIR.is_dir():
+        remote_base, local_dir = _effective_devtools()
+        if remote_base:
+            return self._serve_devtools_remote(rel, remote_base)
+        if not local_dir.is_dir():
             self._send_json({
                 "error": "devtools 资源未构建",
-                "hint": "设置 DEVTOOLS_DIR 指向 front_end 产物目录（本地路径或 http(s):// 远程地址）",
+                "hint": "点页面右上 ⚙ 配置源地址（http(s) URL 或本地 front_end 目录），或设置 DEVTOOLS_DIR",
             }, 404)
             return
         # 目录请求：跳到 inspector.html（DevTools 入口）
         if not rel or rel.endswith("/"):
             rel = "inspector.html"
-        path = (DEVTOOLS_DIR / rel).resolve()
-        if not str(path).startswith(str(DEVTOOLS_DIR.resolve())) or not path.is_file():
+        path = (local_dir / rel).resolve()
+        if not str(path).startswith(str(local_dir.resolve())) or not path.is_file():
             self._send_json({"error": "devtools: not found"}, 404)
             return
         ext = path.suffix.lower()
@@ -1153,8 +1248,8 @@ class Handler(BaseHTTPRequestHandler):
         # devtools 资源较大且不变，浏览器缓存 1 小时
         self._send_bytes(path.read_bytes(), ctype, cache=3600)
 
-    def _serve_devtools_remote(self, rel):
-        """远程模式：从 DEVTOOLS_REMOTE_BASE 拉取资源，落盘缓存到 devtools-local/.remote-cache/。"""
+    def _serve_devtools_remote(self, rel, remote_base):
+        """远程模式：从 remote_base 拉取资源，落盘缓存到 devtools-local/.remote-cache/。"""
         if not rel or rel.endswith("/"):
             rel = "inspector.html"
         if ".." in rel or rel.startswith("/") or "\\" in rel:
@@ -1166,7 +1261,7 @@ class Handler(BaseHTTPRequestHandler):
             data = cache_path.read_bytes()
             ctype = _DEVTOOLS_MIME.get(cache_path.suffix.lower(), "application/octet-stream")
         else:
-            url = f"{DEVTOOLS_REMOTE_BASE.rstrip('/')}/{rel}"
+            url = f"{remote_base}/{rel}"
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "h5-tool"})
                 with urllib.request.urlopen(req, timeout=10) as resp:
@@ -1205,6 +1300,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._serve_static("index.html")
             elif path == "/devtools.html":
                 self._serve_static("devtools.html")
+            elif path == "/api/devtools-source":
+                self._send_json(_devtools_cfg_status())
             elif path == "/api/status":
                 self._send_json(get_status(device))
             elif path == "/api/devices":
@@ -1295,7 +1392,23 @@ class Handler(BaseHTTPRequestHandler):
             is_multipart = ctype.startswith("multipart/form-data")
             body = {} if is_multipart else self._read_body()
             device = body.get("device") or self._query_device()
-            if path == "/api/navigate":
+            if path == "/api/devtools-source":
+                # 页面 ⚙ 设置 DevTools 面板源：source 为空串 = 恢复默认。
+                # 保存前预检可达性；源变更后清空旧缓存（热生效，无需重启）。
+                new_source = (body.get("source") or "").strip()
+                try:
+                    if new_source:
+                        _validate_devtools_source(new_source)
+                    else:
+                        new_source = None
+                except Exception as e:
+                    return self._send_json({"error": f"源不可用：{e}"}, 400)
+                if new_source != _read_devtools_cfg():
+                    _write_devtools_cfg(new_source)
+                    _clear_devtools_cache()
+                self._send_json({"ok": True, **_devtools_cfg_status()})
+
+            elif path == "/api/navigate":
                 url = (body.get("url") or "").strip()
                 if not url:
                     return self._send_json({"error": "缺少 url"}, 400)

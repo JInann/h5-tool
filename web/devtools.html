@@ -185,6 +185,43 @@
     padding: 5px 14px; font-size: 11.5px; color: var(--muted); line-height: 1.6;
     border-top: 1px solid var(--border); background: var(--panel2);
   }
+  /* DevTools 面板源设置（右上 ⚙ + 弹层） */
+  .cfg-gear {
+    position: fixed; top: 14px; right: 14px; z-index: 70;
+    width: 34px; height: 34px; padding: 0; font-size: 16px; line-height: 1;
+    background: rgba(26, 29, 39, .88); border: 1px solid var(--border); color: var(--text);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+  }
+  .cfg-gear:hover { background: rgba(26, 29, 39, .88); border-color: var(--accent); color: var(--accent); }
+  .cfg-modal {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 80;
+    display: flex; align-items: flex-start; justify-content: flex-end; padding: 62px 18px 18px;
+  }
+  .cfg-modal[hidden] { display: none; }
+  .cfg-card {
+    width: min(480px, 100%); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; box-shadow: 0 10px 34px rgba(0, 0, 0, .35);
+  }
+  .cfg-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); font-size: 13px; }
+  .cfg-bar .cfg-state { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+  .cfg-bar button.ghost { padding: 4px 9px; font-size: 12px; }
+  .cfg-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 9px; }
+  .cfg-tip { font-size: 11.5px; color: var(--muted); line-height: 1.65; }
+  .cfg-tip code { background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; font-size: 11px; word-break: break-all; }
+  .cfg-body input {
+    width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 7px 10px; font: inherit; font-size: 12px; outline: none;
+  }
+  .cfg-body input:focus { border-color: var(--accent); }
+  .cfg-row { display: flex; gap: 8px; }
+  .cfg-row button { padding: 6px 14px; font-size: 12px; border-radius: 6px; }
+  .cfg-row button.ghost { padding: 6px 12px; }
+  .cfg-msg { font-size: 12px; min-height: 16px; line-height: 1.5; }
+  .cfg-msg.ok { color: var(--ok); }
+  .cfg-msg.err { color: var(--err); }
 
 </style>
 </head>
@@ -244,6 +281,31 @@
     <div class="mirror-tip">
       屏幕流需 iPhone 系统 iOS 27+（iOS 26 及更早不开放 displayservice，换机无用）；首次连接需 10~40 秒（起隧道 + 设备开媒体流）。
       Windows 浏览器需支持 HEVC 解码（Chrome/Edge 需系统「HEVC 视频扩展」，Safari 无需）。
+    </div>
+  </div>
+</div>
+
+<!-- DevTools 面板源设置（右上 ⚙ 打开） -->
+<button class="cfg-gear" id="cfgBtn" title="DevTools 面板源设置">⚙</button>
+<div class="cfg-modal" id="cfgModal" hidden>
+  <div class="cfg-card">
+    <div class="cfg-bar">
+      <b>⚙ DevTools 面板源</b>
+      <span class="cfg-state" id="cfgState">—</span>
+      <button class="ghost" id="cfgClose">✕</button>
+    </div>
+    <div class="cfg-body">
+      <div class="cfg-tip">
+        DevTools 面板资源（inspector.html 等）按需从下方地址拉取，缓存到本地 <code>devtools-local/.remote-cache/</code>；
+        支持 http(s) URL 或本地 front_end 目录路径。保存后立即生效，源变更会自动清空旧缓存。
+      </div>
+      <input id="cfgInput" placeholder="http(s)://… 或本地 front_end 路径" spellcheck="false" autocomplete="off" />
+      <div class="cfg-row">
+        <button id="cfgSave">保存并生效</button>
+        <button class="ghost" id="cfgReset">恢复默认</button>
+      </div>
+      <div class="cfg-msg" id="cfgMsg"></div>
+      <div class="cfg-tip">默认：<code id="cfgDefault">…</code></div>
     </div>
   </div>
 </div>
@@ -923,6 +985,69 @@ setInterval(() => { try { loadDevices(); } catch (e) {} }, 8000);  // 设备 tab
   }
   qnSend.addEventListener("click", send);
   renderHistory();
+})();
+
+// ---------- DevTools 面板源设置（⚙，后端 /api/devtools-source 热生效） ----------
+(() => {
+  const btn = $("cfgBtn"), modal = $("cfgModal");
+  const input = $("cfgInput"), stateEl = $("cfgState"), msgEl = $("cfgMsg");
+  const saveBtn = $("cfgSave"), resetBtn = $("cfgReset"), closeBtn = $("cfgClose");
+  const defEl = $("cfgDefault");
+  if (!btn || !modal) return;
+  const setMsg = (t, ok) => {
+    msgEl.textContent = t || "";
+    msgEl.className = "cfg-msg" + (t ? (ok ? " ok" : " err") : "");
+  };
+  async function refresh() {
+    stateEl.textContent = "读取中…";
+    try {
+      const r = await fetch(apiUrl("/api/devtools-source"), fetchOpts());
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      defEl.textContent = d.default || "—";
+      input.placeholder = d.default || "http(s)://… 或本地路径";
+      // configured = 用户自定义（持久化）；无自定义时展示当前生效源（默认或后端 env）
+      const customized = !!(d.configured && d.configured !== d.default);
+      input.value = d.configured || d.effective || "";
+      stateEl.textContent = customized ? "自定义源" : "默认源";
+      stateEl.style.color = customized ? "var(--accent)" : "";
+    } catch (e) {
+      stateEl.textContent = "读取失败";
+      setMsg("无法读取配置：" + e.message, false);
+    }
+  }
+  async function save(source) {
+    saveBtn.disabled = resetBtn.disabled = true;
+    setMsg("校验中…", true);
+    try {
+      const r = await fetch(apiUrl("/api/devtools-source"), fetchOpts({
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+      }));
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || ("HTTP " + r.status));
+      setMsg("✓ 已生效（按需重建缓存）", true);
+      await refresh();
+    } catch (e) {
+      setMsg("✗ " + e.message, false);
+    } finally {
+      saveBtn.disabled = resetBtn.disabled = false;
+    }
+  }
+  btn.addEventListener("click", () => {
+    modal.hidden = false;
+    refresh();
+    setTimeout(() => { input.focus(); input.select(); }, 50);
+  });
+  closeBtn.addEventListener("click", () => { modal.hidden = true; });
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.hidden = true; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") modal.hidden = true; });
+  saveBtn.addEventListener("click", () => {
+    const v = input.value.trim();
+    if (!v) return setMsg("请输入源地址（http(s) URL 或本地路径），或点「恢复默认」", false);
+    save(v);
+  });
+  resetBtn.addEventListener("click", () => save(""));
 })();
 </script>
 </body>
