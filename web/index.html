@@ -167,11 +167,13 @@
 
   /* ===== 通用弹窗（可拖动 + 可缩放） ===== */
   .mod-modal {
-    position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 95;
+    position: fixed; inset: 0; background: none; z-index: 95;
+    pointer-events: none;   /* 无遮罩：弹窗层不拦截下层点击 */
   }
   .mod-modal[hidden] { display: none; }
   .mod-card {
     position: fixed;
+    pointer-events: auto;   /* 卡片本身拦截交互，下层其余区域可正常点击 */
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 12px 40px rgba(0, 0, 0, .4);
@@ -1021,6 +1023,13 @@ function makeFabDraggable(el, key) {
 // =====================================================================
 // 通用弹窗：打开（居中）/ 关闭 / 拖动 / 缩放
 // =====================================================================
+// 置顶：多弹窗共存时，点击哪个卡片哪个在最上层
+let _zTop = 95;
+function bringToFront(modal) {
+  _zTop += 1;
+  modal.style.zIndex = _zTop;
+}
+
 function openModal(id) {
   const modal = document.getElementById(id);
   if (!modal) return;
@@ -1031,6 +1040,7 @@ function openModal(id) {
     card.style.left = Math.max(8, (window.innerWidth - w) / 2) + "px";
     card.style.top = Math.max(8, (window.innerHeight - h) / 2) + "px";
   }
+  bringToFront(modal);
   if (window.__onModalOpen) window.__onModalOpen(id);
 }
 function closeModal(id) {
@@ -1043,9 +1053,10 @@ document.querySelectorAll(".mod-modal").forEach((modal) => {
   const bar = modal.querySelector(".mod-bar");
   const resize = modal.querySelector(".mod-resize");
   const closeBtn = modal.querySelector("[data-close]");
-  // 关闭
+  // 关闭（仅 ✕ 按钮；无遮罩，不再点空白处关闭）
   if (closeBtn) closeBtn.addEventListener("click", () => { modal.hidden = true; });
-  modal.addEventListener("click", (e) => { if (e.target === modal) modal.hidden = true; });
+  // 点击卡片任意位置 → 置顶（捕获阶段，拖动/缩放前即生效）
+  card.addEventListener("pointerdown", () => bringToFront(modal), true);
   // 拖动（标题栏）
   let drag = null;
   if (bar) {
