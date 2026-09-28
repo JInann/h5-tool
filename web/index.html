@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="zh-CN" data-page-node-id="g0d157EnSqIzc2XicTrAy7">
+<head data-page-node-id="ceVlOCqLSRDqTJvkZmYITN">
+<meta charset="utf-8" data-page-node-id="UcEoY3vVFIcyEDje51nipY">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="iEvtYOwZEYgCcKCFr1M1Mn">
 <title>H5 小工具 · WebView 调试</title>
 <style>
   :root {
@@ -335,216 +335,216 @@
   .toggle input:checked + .slider::before { transform: translateX(16px); }
 </style>
 </head>
-<body>
-<div class="dock" id="deviceDock" title="拖动位置 · 移入展开全部设备">
-  <div class="device-tabs" id="deviceTabs"><span class="tab-empty">加载中…</span></div>
+<body data-page-node-id="EmnNGQINGJ63YDf8n0XVxF">
+<div class="dock" id="deviceDock" title="拖动位置 · 移入展开全部设备" data-page-node-id="02wzoQ1VYemqLnj4L7KBbn">
+  <div class="device-tabs" id="deviceTabs" data-page-node-id="FS4m9wTcT0oiSJREdX3OzJ"><span class="tab-empty" data-page-node-id="YRWi9S1Qw2tUPNyQjNmQPX">加载中…</span></div>
 </div>
-<div class="layout">
-  <div class="panel">
-    <div class="adb-banner" id="adbBanner" hidden>
+<div class="layout" data-page-node-id="2o4SV9MdkRy3ekfMBBwix8">
+  <div class="panel" data-page-node-id="ovYfaVm3xRiMbWeuJA5RHZ">
+    <div class="adb-banner" id="adbBanner" hidden data-page-node-id="cS0vPKZ8fjjfo13cnSrA2x">
       ⚠ 未检测到 adb（Android 调试桥），截图 / 点击 / WebView 调试等功能不可用。
-      macOS 安装 <code>brew install android-platform-tools</code>，装好后刷新页面。
+      macOS 安装 <code data-page-node-id="P2yNdHXTLX3inDhVCrjBuq">brew install android-platform-tools</code>，装好后刷新页面。
     </div>
-    <div class="section">
-      <h2 id="secTitle"><span class="dot" id="dotPhone"></span>手机 WebView</h2>
-      <div id="phoneList"></div>
+    <div class="section" data-page-node-id="wQ4wjFJsrSqiYJql28lju7">
+      <h2 id="secTitle" data-page-node-id="9Je3NmlRcO4JPE8wfoK1P0"><span class="dot" id="dotPhone" data-page-node-id="4f1fHPaHxWMFEtlNsKqen4"></span>手机 WebView</h2>
+      <div id="phoneList" data-page-node-id="gO4XcTxHVf7dxm1p1gDzae"></div>
     </div>
-    <div class="hint" id="secHint">
-      点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>
-      「新窗口」独立打开。<br>
+    <div class="hint" id="secHint" data-page-node-id="ahTgEvHADJzgbXozJjGLnM">
+      点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br data-page-node-id="TDeqc42HifVnaBzlaVyxak">
+      「新窗口」独立打开。<br data-page-node-id="BC21urilBJOfqYYg9UlmmD">
       手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。
     </div>
-    <div class="quick-nav">
-      <h2>快捷修改地址</h2>
-      <div class="qn-row">
-        <input id="qnInput" list="qnHistory" placeholder="http://{ip}:5173/xx.html  或 https://example.com" />
-        <button id="qnSend">发送</button>
+    <div class="quick-nav" data-page-node-id="GOdNK0r7lb1aXJsvAW49Pe">
+      <h2 data-page-node-id="lUJtTmb7Tc8N76fBsGHiGf">快捷修改地址</h2>
+      <div class="qn-row" data-page-node-id="Mrmv2ZmiZ2p5JS3soEOt5D">
+        <input id="qnInput" list="qnHistory" placeholder="http://{ip}:5173/xx.html  或 https://example.com" data-page-node-id="GKLOaBhoGcPV4CKJPsXTPh" />
+        <button id="qnSend" data-page-node-id="DwhCqlaT76cWjzdu9XJEq1">发送</button>
       </div>
-      <div class="msg" id="qnMsg"></div>
-      <datalist id="qnHistory"></datalist>
+      <div class="msg" id="qnMsg" data-page-node-id="py4kYNUd2tTG87QGqvKiGL"></div>
+      <datalist id="qnHistory" data-page-node-id="8tcJD5CAtARQiJCAoMLw9e"></datalist>
     </div>
-    <div class="hint" style="padding:0 0 80px;">回车发送；<code>{ip}</code> 自动替换为本机 IP，输入与发送历史自动保存。</div>
+    <div class="hint" style="padding:0 0 80px;" data-page-node-id="0EmkDEJ3XUvW5AsfU5LjAd">回车发送；<code data-page-node-id="1SOVYoB6jnfiJA4ANKaS9V">{ip}</code> 自动替换为本机 IP，输入与发送历史自动保存。</div>
   </div>
-  <div id="view">
-    <iframe id="frame" hidden></iframe>
+  <div id="view" data-page-node-id="LdLA923Hz120SgPF19OPsw">
+    <iframe id="frame" hidden data-page-node-id="bSMkf5rdElBRaN7Z47zH1p"></iframe>
   </div>
 </div>
 
 <!-- ===== 悬浮功能按钮 ===== -->
-<div class="fab" id="fabClip" data-mod="clip" title="剪贴板同步">📋</div>
-<div class="fab" id="fabFile" data-mod="file" title="文件推送">📁</div>
-<div class="fab" id="fabApk" data-mod="apk" title="APK 安装">📦</div>
-<div class="fab" id="fabMirror" data-mod="mirror" title="屏幕镜像">📺</div>
-<div class="fab" id="fabPort" data-mod="port" title="释放端口">🔌</div>
-<div class="fab" id="fabClaude" data-mod="claude" title="Claude 延迟测试">🧪</div>
-<div class="fab" id="fabCfg" data-mod="cfg" title="控制面板">⚙</div>
+<div class="fab" id="fabClip" data-mod="clip" title="剪贴板同步" data-page-node-id="psDg9GnUd4F87EkS9TH3bz">📋</div>
+<div class="fab" id="fabFile" data-mod="file" title="文件推送" data-page-node-id="KDuYNSqF7pNVFKZm8DDQIf">📁</div>
+<div class="fab" id="fabApk" data-mod="apk" title="APK 安装" data-page-node-id="EfFLiD1xtc6CO5GwLs2Q9Z">📦</div>
+<div class="fab" id="fabMirror" data-mod="mirror" title="屏幕镜像" data-page-node-id="KG3m86Co7qui9IGq5G3LKZ">📺</div>
+<div class="fab" id="fabPort" data-mod="port" title="释放端口" data-page-node-id="re5JfMd6pYnh9M1WVMmu53">🔌</div>
+<div class="fab" id="fabClaude" data-mod="claude" title="Claude 延迟测试" data-page-node-id="NDsZnkazk7pjZQajSiycVo">🧪</div>
+<div class="fab" id="fabCfg" data-mod="cfg" title="控制面板" data-page-node-id="tCcWruJkDtN1RFKHmFX5lB">⚙</div>
 
 <!-- ===== 弹窗：剪贴板同步 ===== -->
-<div class="mod-modal" id="modClip" hidden>
-  <div class="mod-card">
-    <div class="mod-bar"><span class="mod-title">📋 剪贴板同步</span><span class="mod-grow"></span><button class="mod-close" data-close>✕</button></div>
-    <div class="mod-body">
-      <div class="row">
-        <span id="clipStatus" style="font-size:12px;color:var(--muted);">检测中…</span>
-        <button class="ghost" id="btnClipInstall" hidden style="margin-left:auto;">安装到手机</button>
+<div class="mod-modal" id="modClip" hidden data-page-node-id="FDhuEF3Jp1Ww40uYswB8el">
+  <div class="mod-card" data-page-node-id="NSe6PDtjzsBDLXNTgPr3wB">
+    <div class="mod-bar" data-page-node-id="9S2Pf9RY2MxJESw1AlFIDb"><span class="mod-title" data-page-node-id="UgQMrDNez98MEX1HvEnT6s">📋 剪贴板同步</span><span class="mod-grow" data-page-node-id="qQJpOkaZGsXvVdNv992EFP"></span><button class="mod-close" data-close data-page-node-id="St1xmGEY7WskcrekbpdDus">✕</button></div>
+    <div class="mod-body" data-page-node-id="iB19zl5ZBJ1IFNPHnFVM0p">
+      <div class="row" data-page-node-id="DGQBnJRnEEU3Tc55BsbZ3j">
+        <span id="clipStatus" style="font-size:12px;color:var(--muted);" data-page-node-id="AnWCXNZPnj8PS7t5oi2UwU">检测中…</span>
+        <button class="ghost" id="btnClipInstall" hidden style="margin-left:auto;" data-page-node-id="1rAvoQknmjGkR9fdg34exv">安装到手机</button>
       </div>
-      <div class="clip-hist" id="clipHist"><div class="hint" style="text-align:center;">暂无同步记录</div></div>
-      <div class="hint">自动双向同步（仅文本）：手机复制 → 自动写入 Mac，Mac 复制 → 自动写入手机（每 2 秒检测，手机需亮屏解锁）。基于 <a href="https://github.com/polygraphene/adb-clip" target="_blank" style="color:var(--accent);">adb-clip</a>，免装 App。</div>
-      <div class="msg" id="clipMsg"></div>
+      <div class="clip-hist" id="clipHist" data-page-node-id="XtMAMX3UAGEiZv1d6wWZC2"><div class="hint" style="text-align:center;" data-page-node-id="ijJ0RHCYRrfCbXY9gEaAbt">暂无同步记录</div></div>
+      <div class="hint" data-page-node-id="VpR1uDFkHvXe6xvyb2OHP3">自动双向同步（仅文本）：手机复制 → 自动写入 Mac，Mac 复制 → 自动写入手机（每 2 秒检测，手机需亮屏解锁）。基于 <a href="https://github.com/polygraphene/adb-clip" target="_blank" style="color:var(--accent);" data-page-node-id="WheFrdgF96bML8K0S5Kw3D">adb-clip</a>，免装 App。</div>
+      <div class="msg" id="clipMsg" data-page-node-id="kMXajQt9ZRdQAv0dVBYmrk"></div>
     </div>
-    <div class="mod-resize"></div>
+    <div class="mod-resize" data-page-node-id="rkUgICAppESzVCHLR67GsV"></div>
   </div>
 </div>
 
 <!-- ===== 弹窗：文件推送 ===== -->
-<div class="mod-modal" id="modFile" hidden>
-  <div class="mod-card">
-    <div class="mod-bar"><span class="mod-title">📁 文件推送</span><span class="mod-grow"></span><button class="mod-close" data-close>✕</button></div>
-    <div class="mod-body">
-      <div class="drop-zone" id="fileDrop">
-        <div class="dz-icon">📁</div>
-        <div class="dz-text">拖拽文件到这里，或点击选择</div>
-        <div class="dz-sub">推送到手机 <code>/sdcard/Download/h5-tool/</code></div>
-        <input type="file" id="fileInput" multiple hidden />
+<div class="mod-modal" id="modFile" hidden data-page-node-id="YAzwPa6hxH4SDsn6UF8Bky">
+  <div class="mod-card" data-page-node-id="ePlw4kRJ4mNnkVwfvlYGD9">
+    <div class="mod-bar" data-page-node-id="4ornAbAxvWWUDRUx0iFzgc"><span class="mod-title" data-page-node-id="3v4SX0S5W9Kv2Ffpz3eKFm">📁 文件推送</span><span class="mod-grow" data-page-node-id="agjG2JahACuI74ER1qxQkd"></span><button class="mod-close" data-close data-page-node-id="2Q5jyUzCj7qUYLetEVvDoA">✕</button></div>
+    <div class="mod-body" data-page-node-id="5ZaDXQqsBGPrO8ksj4lDAe">
+      <div class="drop-zone" id="fileDrop" data-page-node-id="MiOqbv86dwpe8DVnTXrZAm">
+        <div class="dz-icon" data-page-node-id="BqCDEDuwNFOdhAoWtDczEB">📁</div>
+        <div class="dz-text" data-page-node-id="AFqQoDO8xGICcb2wiemBtb">拖拽文件到这里，或点击选择</div>
+        <div class="dz-sub" data-page-node-id="DEGx05mXMoGjLx2m4HgZ5d">推送到手机 <code data-page-node-id="lBRt0x026bX8rSyon7dLXy">/sdcard/Download/h5-tool/</code></div>
+        <input type="file" id="fileInput" multiple hidden data-page-node-id="HvaGL4B6F7Ye4C4HrxEqpQ" />
       </div>
-      <div class="msg" id="fileMsg"></div>
-      <div class="transfer-list" id="fileList"></div>
+      <div class="msg" id="fileMsg" data-page-node-id="dnnql9OMaKHpHFFeRy2CS7"></div>
+      <div class="transfer-list" id="fileList" data-page-node-id="xDxBO5bQRhFeSs9nQFMPmi"></div>
     </div>
-    <div class="mod-resize"></div>
+    <div class="mod-resize" data-page-node-id="AvzNBXzskq0CYVCAPvVQO8"></div>
   </div>
 </div>
 
 <!-- ===== 弹窗：APK 安装 ===== -->
-<div class="mod-modal" id="modApk" hidden>
-  <div class="mod-card">
-    <div class="mod-bar"><span class="mod-title">📦 APK 安装</span><span class="mod-grow"></span><button class="mod-close" data-close>✕</button></div>
-    <div class="mod-body">
-      <div class="drop-zone" id="apkDrop">
-        <div class="dz-icon">📦</div>
-        <div class="dz-text">拖拽 APK 到这里，或点击选择</div>
-        <div class="dz-sub">上传后自动 <code>adb install -r</code> 安装到手机</div>
-        <input type="file" id="apkInput" accept=".apk" hidden />
+<div class="mod-modal" id="modApk" hidden data-page-node-id="EvXCHXWgqtK23Cy8CXjj78">
+  <div class="mod-card" data-page-node-id="cE6F1Az3CmCJVyXem5jxNK">
+    <div class="mod-bar" data-page-node-id="K5oBiHI5sNfPtgFMQqkCUd"><span class="mod-title" data-page-node-id="Egql8RKWnpQrCGg6ispGnf">📦 APK 安装</span><span class="mod-grow" data-page-node-id="oD6fgH7FAah7BwPDeeU17D"></span><button class="mod-close" data-close data-page-node-id="iXg0BrD0PKbksHu9a0oQOa">✕</button></div>
+    <div class="mod-body" data-page-node-id="xLtn2GQhhxDcrN9qJHyqlo">
+      <div class="drop-zone" id="apkDrop" data-page-node-id="UIuL5dEx968jTaEQH69cA9">
+        <div class="dz-icon" data-page-node-id="zoBhW45vn9f8NEKUW7Kjf6">📦</div>
+        <div class="dz-text" data-page-node-id="E3MCVRHuuT6hr4dawDUyTX">拖拽 APK 到这里，或点击选择</div>
+        <div class="dz-sub" data-page-node-id="KqoFgKIyD4nzVj0VGn4PiJ">上传后自动 <code data-page-node-id="BBLEUHDzVxPfCc7XFjNSsQ">adb install -r</code> 安装到手机</div>
+        <input type="file" id="apkInput" accept=".apk" hidden data-page-node-id="r5wXr6mxc1O8gSXQ6uAbKe" />
       </div>
-      <div class="msg" id="apkMsg"></div>
-      <div class="transfer-list" id="apkList"></div>
+      <div class="msg" id="apkMsg" data-page-node-id="scPW6YZsiRnX5xs1LGtcEK"></div>
+      <div class="transfer-list" id="apkList" data-page-node-id="Ud9fbRimQPWaC3DF06T7TQ"></div>
     </div>
-    <div class="mod-resize"></div>
+    <div class="mod-resize" data-page-node-id="rESdCkEx13BpiR4benmmgx"></div>
   </div>
 </div>
 
 <!-- ===== 弹窗：屏幕镜像（Android + iOS 统一） ===== -->
-<div class="mod-modal" id="modMirror" hidden>
-  <div class="mod-card">
-    <div class="mod-bar"><span class="mod-title">📺 屏幕镜像</span><span class="mod-grow"></span><button class="mod-close" data-close>✕</button></div>
-    <div class="mod-body" id="mirrorBody">
-      <div class="mirror-platform">
-        <span class="mp-label">当前设备</span>
-        <span class="mp-tag" id="mirrorPlatformTag">—</span>
+<div class="mod-modal" id="modMirror" hidden data-page-node-id="BcRuKNsRXTHiyN3oPqPpAj">
+  <div class="mod-card" data-page-node-id="fQU3vdwqMCyPHHVaOVgysb">
+    <div class="mod-bar" data-page-node-id="zsxyisFECnyIJfSUjKzZ2H"><span class="mod-title" data-page-node-id="4zuNERwkFz35wtPGUNjbPg">📺 屏幕镜像</span><span class="mod-grow" data-page-node-id="rN0ECyS93AY2zYFnakHxbS"></span><button class="mod-close" data-close data-page-node-id="k7HKh0fJOXIBhgS6VFKiIo">✕</button></div>
+    <div class="mod-body" id="mirrorBody" data-page-node-id="1PAfsXuZAKzb2Uu2HYJHP5">
+      <div class="mirror-platform" data-page-node-id="WvgQZOc8f0y9NjXhLNdC7d">
+        <span class="mp-label" data-page-node-id="DuSoIQbAkZE8IzzOyFOBMr">当前设备</span>
+        <span class="mp-tag" id="mirrorPlatformTag" data-page-node-id="b4PnzNMEBCB11x9VWFf7jr">—</span>
       </div>
       <!-- Android 分支：scrcpy / PNG 镜像 -->
-      <div id="mirrorAndroid" style="display:flex;flex-direction:column;flex:1;min-height:0;">
-        <div class="toolbar">
-          <button id="btnLive">▶ 开始镜像</button>
-          <button class="ghost" id="btnShot">截图并复制</button>
-          <button class="ghost" id="btnShotDl" disabled>下载 PNG</button>
-          <button class="ghost" id="btnBack">← 返回</button>
-          <button class="ghost" id="btnHome">⌂ 主页</button>
-          <span class="fps" id="fpsLabel"></span>
+      <div id="mirrorAndroid" style="display:flex;flex-direction:column;flex:1;min-height:0;" data-page-node-id="XNePhPKffU5WiXYAfu3qhu">
+        <div class="toolbar" data-page-node-id="U0Zs3dtxFymQXtL59fCY9U">
+          <button id="btnLive" data-page-node-id="V5D1QPOjOc7le8fwyhlPXJ">▶ 开始镜像</button>
+          <button class="ghost" id="btnShot" data-page-node-id="5TOd5bVw00B1XQleAjOA29">截图并复制</button>
+          <button class="ghost" id="btnShotDl" disabled data-page-node-id="E4KqE9hcmlIspEhfP6Ubf1">下载 PNG</button>
+          <button class="ghost" id="btnBack" data-page-node-id="HIELzSZTmsXVB3tF2x89kz">← 返回</button>
+          <button class="ghost" id="btnHome" data-page-node-id="LYyPDEflUDi9fD6ZjtTn0b">⌂ 主页</button>
+          <span class="fps" id="fpsLabel" data-page-node-id="Tp64uFxToJemloZH1J1Tri"></span>
         </div>
-        <div class="msg" id="shotMsg" style="text-align:center;"></div>
-        <div id="screenWrap">
-          <div id="screenFrame">
-            <canvas id="scrcpyCanvas" alt="屏幕镜像" style="display:none;"></canvas>
-            <img id="screen" alt="屏幕镜像" style="display:none;" />
-            <div id="tapMark"></div>
-            <div class="screen-empty" id="screenEmpty">点击「开始镜像」实时查看手机屏幕。<br>支持 WebCodecs 的浏览器（Chrome / Edge）走 scrcpy 硬件编码，30–60fps 低延迟；<br>在画面上点击 = 模拟点击手机，拖动 = 滑动。</div>
+        <div class="msg" id="shotMsg" style="text-align:center;" data-page-node-id="pXFkzCoeBF4HXEm8bgaPjh"></div>
+        <div id="screenWrap" data-page-node-id="NiAJPFTSX8QGjzMki5ML3O">
+          <div id="screenFrame" data-page-node-id="XEGkMLO48BRNNMZSVTIHLi">
+            <canvas id="scrcpyCanvas" alt="屏幕镜像" style="display:none;" data-page-node-id="QY32mbaMjwESQjamtV8Azu"></canvas>
+            <img id="screen" alt="屏幕镜像" style="display:none;" data-page-node-id="uuferhajdUqmJAJ07FeYCD" />
+            <div id="tapMark" data-page-node-id="9WyawKCb8SK2UBsOpmeyHI"></div>
+            <div class="screen-empty" id="screenEmpty" data-page-node-id="sEPoRf6CC0aBWRqdN7ZerQ">点击「开始镜像」实时查看手机屏幕。<br data-page-node-id="6toa9hUjdP5Y4GQommoaW5">支持 WebCodecs 的浏览器（Chrome / Edge）走 scrcpy 硬件编码，30–60fps 低延迟；<br data-page-node-id="uWA4R0PFuNBOPR8J0qpPer">在画面上点击 = 模拟点击手机，拖动 = 滑动。</div>
           </div>
         </div>
-        <div class="hint" style="text-align:center;">画面点击映射为设备真实坐标；按住拖动可滑动/滚动页面。</div>
+        <div class="hint" style="text-align:center;" data-page-node-id="LIbgA4YyZBnZ2rgb1CnYUY">画面点击映射为设备真实坐标；按住拖动可滑动/滚动页面。</div>
       </div>
       <!-- iOS 分支：pmd3 serve-web viewer -->
-      <div id="mirrorIos" style="display:none;flex-direction:column;flex:1;min-height:0;" hidden>
-        <div class="mirror-ios-row">
-          <button id="iosMirrorOpen">📺 开始 iOS 镜像</button>
-          <span class="m-state" id="iosMirrorState"></span>
-          <button class="ghost" id="iosMirrorStop" hidden>⏹ 停止</button>
+      <div id="mirrorIos" style="display:none;flex-direction:column;flex:1;min-height:0;" hidden data-page-node-id="3hSEctrxfIlPUoIaKyJTZv">
+        <div class="mirror-ios-row" data-page-node-id="vYOqI7ZgRJRUDdeHNSPqGd">
+          <button id="iosMirrorOpen" data-page-node-id="pNp0nZzOvT983T8YU8uHNf">📺 开始 iOS 镜像</button>
+          <span class="m-state" id="iosMirrorState" data-page-node-id="DAxv7c7hYjWOYLyX1sWW0o"></span>
+          <button class="ghost" id="iosMirrorStop" hidden data-page-node-id="sUSTDd0pvznElCGoYB29hn">⏹ 停止</button>
         </div>
-        <div class="mirror-msg" id="iosMirrorMsg" hidden></div>
-        <div class="mirror-ios-frame"><iframe id="iosMirrorFrame"></iframe></div>
-        <div class="mirror-tip">屏幕流需 iPhone 系统 iOS 27+（iOS 26 及更早不开放 displayservice，换机无用）；首次连接需 10~40 秒（起隧道 + 设备开媒体流）。Windows 浏览器需支持 HEVC 解码（Chrome/Edge 需系统「HEVC 视频扩展」，Safari 无需）。点画面=点击，按住拖动=滑动。</div>
+        <div class="mirror-msg" id="iosMirrorMsg" hidden data-page-node-id="KPAODIQTBhMdWF3wW3DerY"></div>
+        <div class="mirror-ios-frame" data-page-node-id="hPPv43pEIwgnPLkWtta4IJ"><iframe id="iosMirrorFrame" data-page-node-id="EWGFQCRnBKIf1nAEb18mJf"></iframe></div>
+        <div class="mirror-tip" data-page-node-id="AXREGockzzTIGT78vIercV">屏幕流需 iPhone 系统 iOS 27+（iOS 26 及更早不开放 displayservice，换机无用）；首次连接需 10~40 秒（起隧道 + 设备开媒体流）。Windows 浏览器需支持 HEVC 解码（Chrome/Edge 需系统「HEVC 视频扩展」，Safari 无需）。点画面=点击，按住拖动=滑动。</div>
       </div>
     </div>
-    <div class="mod-resize"></div>
+    <div class="mod-resize" data-page-node-id="ZRYEeeHG0KgFvBCM9nc19A"></div>
   </div>
 </div>
 
 <!-- ===== 弹窗：释放端口 ===== -->
-<div class="mod-modal" id="modPort" hidden>
-  <div class="mod-card">
-    <div class="mod-bar"><span class="mod-title">🔌 释放端口</span><span class="mod-grow"></span><button class="mod-close" data-close>✕</button></div>
-    <div class="mod-body">
-      <div class="port-grid" id="portGrid"></div>
-      <div class="row" style="margin-top:10px;">
-        <input id="portCustom" type="number" min="1" max="65535" placeholder="自定义端口，如 3000" />
-        <button id="btnKillCustom">释放</button>
+<div class="mod-modal" id="modPort" hidden data-page-node-id="quCLc3y8474jJtFaT5LGnf">
+  <div class="mod-card" data-page-node-id="NjpEjy2KUjxkUsDZ0RrVZ4">
+    <div class="mod-bar" data-page-node-id="x6N34k22aF74gAl8HSCwcg"><span class="mod-title" data-page-node-id="7Fvr9IHAWLR6VovhWGx8HP">🔌 释放端口</span><span class="mod-grow" data-page-node-id="EKNzMT4EoE0ZpNizVPWbaJ"></span><button class="mod-close" data-close data-page-node-id="EmHO6D7geENj8SCSYTKEYB">✕</button></div>
+    <div class="mod-body" data-page-node-id="MrQd5CqgKaG2Fwg0BAdxSP">
+      <div class="port-grid" id="portGrid" data-page-node-id="QCeeht9Tg5Do08AmTRCdZR"></div>
+      <div class="row" style="margin-top:10px;" data-page-node-id="pqj6xvSMIIoGLh5oZ8DmjB">
+        <input id="portCustom" type="number" min="1" max="65535" placeholder="自定义端口，如 3000" data-page-node-id="HuPt4Q0AWytLeWwbBE5yMN" />
+        <button id="btnKillCustom" data-page-node-id="A2DRuNiajjVO3AwjFqU3pw">释放</button>
       </div>
-      <div class="hint">点击即杀掉占用该端口的进程（<code>lsof</code> + <code>kill -9</code>）；本工具自身端口受保护。</div>
-      <div class="msg" id="portMsg"></div>
+      <div class="hint" data-page-node-id="WdlRQmZWwH4bljKcgPM7Md">点击即杀掉占用该端口的进程（<code data-page-node-id="99i2ylGFJzoI7SRoinWrFj">lsof</code> + <code data-page-node-id="ecEA2TxB0FZo1eutJx2Qsr">kill -9</code>）；本工具自身端口受保护。</div>
+      <div class="msg" id="portMsg" data-page-node-id="4A2M2ks98nk0idAlAN2Z1t"></div>
     </div>
-    <div class="mod-resize"></div>
+    <div class="mod-resize" data-page-node-id="vAxfRAS1oSdrS7LfxCp5dU"></div>
   </div>
 </div>
 
 <!-- ===== 弹窗：Claude 延迟测试 ===== -->
-<div class="mod-modal" id="modClaude" hidden>
-  <div class="mod-card">
-    <div class="mod-bar"><span class="mod-title">🧪 Claude 节点延迟</span><span class="mod-grow"></span><button class="mod-close" data-close>✕</button></div>
-    <div class="mod-body">
-      <div class="row">
-        <button id="btnClaudeTest">测一下</button>
-        <button class="ghost" id="btnClaudeClear">清空记录</button>
+<div class="mod-modal" id="modClaude" hidden data-page-node-id="fFbaXNqhFmrE2Zx9nszx7k">
+  <div class="mod-card" data-page-node-id="BhTkdQslab22WWVm880rNl">
+    <div class="mod-bar" data-page-node-id="cSTAwUvjaT631DmVZWB78k"><span class="mod-title" data-page-node-id="rW2MWe3YYXNvZZTCTfKdm7">🧪 Claude 节点延迟</span><span class="mod-grow" data-page-node-id="EhOu7hH7xOoBQKNkKRoZfm"></span><button class="mod-close" data-close data-page-node-id="8TJDnyNJHaIODudZZldWqv">✕</button></div>
+    <div class="mod-body" data-page-node-id="Ew9ml2ndP4Cggznz66tRDJ">
+      <div class="row" data-page-node-id="Ato3FbJrEbHXb0sTElUfmk">
+        <button id="btnClaudeTest" data-page-node-id="wwvF2Vqi42iquXCDo4uvPu">测一下</button>
+        <button class="ghost" id="btnClaudeClear" data-page-node-id="2o9icsJzsre9sFCsr6O4mh">清空记录</button>
       </div>
-      <div class="claude-now">
-        <span class="claude-rate" id="claudeRate">—</span>
-        <span id="claudeProxy" class="claude-proxy"></span>
+      <div class="claude-now" data-page-node-id="L3fQDTtfPwv6pDvyQ6lYoY">
+        <span class="claude-rate" id="claudeRate" data-page-node-id="dVSQmnpWynlPAvmKcY4OAO">—</span>
+        <span id="claudeProxy" class="claude-proxy" data-page-node-id="Zp9Ia6LiiDMW6FP8R0o8M4"></span>
       </div>
-      <div class="claude-metrics" id="claudeMetrics"></div>
-      <div class="hint">测当前出口节点到 <code>api.anthropic.com</code> 的延迟：TCP 直连 + HTTPS 经代理往返（无需 API Key）。切换节点后点「测一下」即可对比；若新节点只在交互 shell 里设了代理，需重启 h5-tool 后端生效（<code>h5-tool restart</code> 或 Ctrl+C 后重新 start）。</div>
-      <div class="claude-hist" id="claudeHist"></div>
+      <div class="claude-metrics" id="claudeMetrics" data-page-node-id="rfjGdAehSVk7ZEwDmrROnV"></div>
+      <div class="hint" data-page-node-id="57NADARcxjDE6WFrsSDutR">测当前出口节点到 <code data-page-node-id="Z2Ac12e61FSwqakvEfUQRu">api.anthropic.com</code> 的延迟：TCP 直连 + HTTPS 经代理往返（无需 API Key）。切换节点后点「测一下」即可对比；若新节点只在交互 shell 里设了代理，需重启 h5-tool 后端生效（<code data-page-node-id="rnXjtqBcW3IEPlTUgIBE2T">h5-tool restart</code> 或 Ctrl+C 后重新 start）。</div>
+      <div class="claude-hist" id="claudeHist" data-page-node-id="lMorRHmcyG8CzonPFo6OFn"></div>
     </div>
-    <div class="mod-resize"></div>
+    <div class="mod-resize" data-page-node-id="otPyrHpTGPqATG5zkP5L2m"></div>
   </div>
 </div>
 
 <!-- ===== 弹窗：控制面板 ===== -->
-<div class="mod-modal" id="modCfg" hidden>
-  <div class="mod-card">
-    <div class="mod-bar"><span class="mod-title">⚙ 控制面板</span><span class="mod-grow"></span><button class="mod-close" data-close>✕</button></div>
-    <div class="mod-body">
-      <div class="cfg-field">
-        <label>接口地址（后端 backend）</label>
-        <div class="cfg-tip">与运行在你自己电脑上的 h5-tool 后端通信，默认 <code>127.0.0.1:12787</code>；改了端口或部署到服务器后在这里调整，保存立即重连。</div>
-        <input id="cfgBackendInput" placeholder="http://127.0.0.1:12787" spellcheck="false" autocomplete="off" />
-        <div class="cfg-row"><button id="cfgBackendSave">保存并重连</button></div>
-        <div class="cfg-msg" id="cfgBackendMsg"></div>
+<div class="mod-modal" id="modCfg" hidden data-page-node-id="wb1E5AbtDDFbtPtvjpPCFA">
+  <div class="mod-card" data-page-node-id="Kpn9KdputvUi2ivQGFjoSh">
+    <div class="mod-bar" data-page-node-id="ogFqwhxQVdWogBtzn2sIif"><span class="mod-title" data-page-node-id="rlJPkp5WMH0RdQCKczFdow">⚙ 控制面板</span><span class="mod-grow" data-page-node-id="35J1f9FHXGHuiAIKm3rLu2"></span><button class="mod-close" data-close data-page-node-id="UYGDM2TzGUok1qp5xskLqv">✕</button></div>
+    <div class="mod-body" data-page-node-id="qWEcz5AVmsDR8biMCmZPyv">
+      <div class="cfg-field" data-page-node-id="8cFT7XSGSCaulYPKRuvmrB">
+        <label data-page-node-id="DXbV4KMFYBjAPDGI6hXsok">接口地址（后端 backend）</label>
+        <div class="cfg-tip" data-page-node-id="X2W7exvhBOR1z4keoN5nHl">与运行在你自己电脑上的 h5-tool 后端通信，默认 <code data-page-node-id="tBLWxgJxiz6rmRHSp1qbTW">127.0.0.1:12787</code>；改了端口或部署到服务器后在这里调整，保存立即重连。</div>
+        <input id="cfgBackendInput" placeholder="http://127.0.0.1:12787" spellcheck="false" autocomplete="off" data-page-node-id="FGvg6CUHtqrxbKlWTaUDLW" />
+        <div class="cfg-row" data-page-node-id="YXGZt85yA156f7m6AaZgcD"><button id="cfgBackendSave" data-page-node-id="L39gHzzcHC8jbGQPtp7LQn">保存并重连</button></div>
+        <div class="cfg-msg" id="cfgBackendMsg" data-page-node-id="8GARoVCtuFJC7Q2M3KPlGG"></div>
       </div>
-      <div class="cfg-field">
-        <label>缓存源站地址（DevTools 面板源）</label>
-        <div class="cfg-tip">DevTools 面板资源（inspector.html 等）按需从下方地址拉取，缓存到本地 <code>devtools-local/.remote-cache/</code>；支持 http(s) URL 或本地 front_end 目录路径。保存后立即生效，源变更会自动清空旧缓存。</div>
-        <input id="cfgInput" placeholder="http(s)://… 或本地 front_end 路径" spellcheck="false" autocomplete="off" />
-        <div class="cfg-row">
-          <button id="cfgSave">保存并生效</button>
-          <button class="ghost" id="cfgReset">恢复默认</button>
+      <div class="cfg-field" data-page-node-id="sHs0CDZoOsZEwo0C2PjsCf">
+        <label data-page-node-id="L4zqshqONM23KVA86LZyI6">缓存源站地址（DevTools 面板源）</label>
+        <div class="cfg-tip" data-page-node-id="VZeDjwngjW3sMl6CXRh28E">DevTools 面板资源（inspector.html 等）按需从下方地址拉取，缓存到本地 <code data-page-node-id="jGPCM51glyQsbpZEAz8z7G">devtools-local/.remote-cache/</code>；支持 http(s) URL 或本地 front_end 目录路径。保存后立即生效，源变更会自动清空旧缓存。</div>
+        <input id="cfgInput" placeholder="http(s)://… 或本地 front_end 路径" spellcheck="false" autocomplete="off" data-page-node-id="UZdlMHQqb4iRXvChqDvCWE" />
+        <div class="cfg-row" data-page-node-id="kRQdCGmhrbGx8em7tFVNrW">
+          <button id="cfgSave" data-page-node-id="r47T72vw1Brp00umDFvrS9">保存并生效</button>
+          <button class="ghost" id="cfgReset" data-page-node-id="yZKqbHgKC6BSsASlMcyPno">恢复默认</button>
         </div>
-        <div class="cfg-msg" id="cfgMsg"></div>
-        <div class="cfg-tip">默认：<code id="cfgDefault">…</code></div>
+        <div class="cfg-msg" id="cfgMsg" data-page-node-id="vqL1takgOH1PZt1mzYJtmW"></div>
+        <div class="cfg-tip" data-page-node-id="yfp6CHBBOFOeqD6PJdzkUU">默认：<code id="cfgDefault" data-page-node-id="zOlhEMWOyjToiknRBnjdwt">…</code></div>
       </div>
-      <div class="cfg-field">
-        <label>功能模块入口显隐</label>
-        <div id="moduleToggles"></div>
+      <div class="cfg-field" data-page-node-id="3AWB3wp0wAAK0sr0HaGmpy">
+        <label data-page-node-id="BheaNTWusqbnQ8Z90ns54B">功能模块入口显隐</label>
+        <div id="moduleToggles" data-page-node-id="0kiSpZvSD0IwEaRICBDxH7"></div>
       </div>
     </div>
-    <div class="mod-resize"></div>
+    <div class="mod-resize" data-page-node-id="CbL9RvZ2MzVF6EW27XIGut"></div>
   </div>
 </div>
 

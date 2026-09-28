@@ -173,7 +173,7 @@ h5-tool start
 | GET  | `/api/clipboard/status` | 自动同步状态：`{installed, installing, syncing, error, history}` |
 | GET  | `/api/clipboard/history` | 同步历史 `{items:[{direction, content, time}]}`（上限 100 条） |
 | POST | `/api/clipboard/push` | `{text, device?}` 写手机剪贴板（Mac → 手机） |
-| POST | `/api/clipboard/install` | 从 GitHub 下载 adb-clip 并推送到设备 `/data/local/tmp/clip` |
+| POST | `/api/clipboard/install` | 从 GitHub 下载 adb-clip 并推送到设备（`clip` + `clip.jar` + `clip-stdin`） |
 | POST | `/api/files/push`   | multipart 上传文件（`file` 字段）→ 推送到手机 `/sdcard/Download/h5-tool/` |
 | POST | `/api/apk/install` | multipart 上传 `.apk`（`file` 字段）→ `adb install -r` 安装到手机 |
 
@@ -183,6 +183,13 @@ h5-tool start
 首次启动自动从 GitHub 下载部署到设备，失败时控制台会显示「安装到手机」按钮手动兜底。
 手机屏幕必须点亮且解锁，否则系统拒绝访问剪贴板。`--no-clip-sync` 可关闭自动同步。
 支持 macOS（pbcopy/pbpaste）与 Windows（PowerShell）。
+
+**多行文本必须走 stdin 写入**：设备端多一个 `clip-stdin` 包装脚本（`exec clip "$(cat)"`），
+待写文本经 stdin 直传给它。原因：`adb shell` 转发给设备的是一条**按行解析的命令串**，
+若把文本拼进命令行，文本里的换行会被设备端 shell 当成命令分隔符，第二行起被当作独立命令
+执行（`xxx: inaccessible or not found`），结果只有第一行进剪贴板——而这截残值还会被同步线程
+当成「手机端新内容」回写，把 Mac 剪贴板也一并改成一行。老版本只装了 `clip` 的设备，
+启动时会自动补推该脚本，无需重装。
 
 **文件推送 / APK 安装**：左下角悬浮按钮「📁 文件推送」拖拽或点击选择文件上传 → 后端 adb push
 到手机 `/sdcard/Download/h5-tool/`；「📦 APK 安装」拖拽/选择 `.apk` → `adb install -r`

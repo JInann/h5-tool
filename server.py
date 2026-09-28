@@ -273,6 +273,12 @@ def adb_text(serial, text):
 # 基于 polygraphene/adb-clip：通过 app_process 加载 clip.jar 访问 Android 10-16 剪贴板，
 # 无需设备上装 App。工具安装到 /data/local/tmp/clip（clip + clip.jar）。
 CLIP_BIN = "/data/local/tmp/clip"
+# 设备端包装脚本：从 stdin 读全文再交给 clip，让「多行文本」能原样进剪贴板。
+# 为什么必须绕这一手：adb shell 转发给设备的是一条**按行解析的命令串**，把待写文本
+# 拼进命令行时，文本里的换行会被设备端 shell 当成命令分隔符，第二行起被当作独立命令
+# 执行，只有第一行真正写进剪贴板（详见 clipboard_set 注释）。
+CLIP_STDIN_BIN = "/data/local/tmp/clip-stdin"
+CLIP_STDIN_SCRIPT = '#!/system/bin/sh\nexec ' + CLIP_BIN + ' "$(cat)"\n'
 CLIP_RELEASE_URL = "https://github.com/polygraphene/adb-clip/releases/latest/download"
 
 
@@ -281,8 +287,39 @@ def _shell_quote(s):
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _push_clip_stdin(serial):
+    """把 stdin 包装脚本推到设备。脚本内容由本机生成后经 adb push 传输（不经过 shell 传参）。"""
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".sh")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(CLIP_STDIN_SCRIPT)
+        r = run_adb(f"push {shell_needed(tmp)} {CLIP_STDIN_BIN}",
+                    timeout=30, serial=serial)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr or "adb push clip-stdin 失败")
+        run_adb(f"shell chmod 755 {CLIP_STDIN_BIN}", serial=serial)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def clip_installed(serial):
-    return run_adb(f"shell [ -e {CLIP_BIN} ]", serial=serial).returncode == 0
+    """clip 本体 + stdin 包装脚本都就位才算可用。
+
+    老版本只推了 clip（无包装脚本），这里检测到缺失就地补推，不必整包重装。
+    """
+    if run_adb(f"shell [ -e {CLIP_BIN} ]", serial=serial).returncode != 0:
+        return False
+    if run_adb(f"shell [ -x {CLIP_STDIN_BIN} ]", serial=serial).returncode == 0:
+        return True
+    try:
+        _push_clip_stdin(serial)
+    except Exception:
+        return False
+    return run_adb(f"shell [ -x {CLIP_STDIN_BIN} ]", serial=serial).returncode == 0
 
 
 def clip_install(serial):
@@ -297,6 +334,7 @@ def clip_install(serial):
         if r.returncode != 0:
             raise RuntimeError(r.stderr or "adb push 失败")
     run_adb(f"shell chmod 755 {CLIP_BIN}", serial=serial)
+    _push_clip_stdin(serial)
 
 
 def shell_needed(path):
@@ -316,15 +354,27 @@ def clipboard_get(serial):
         if "does not have foreground focus" in err or "clipboard" in err.lower():
             raise RuntimeError("设备剪贴板不可读：请确保手机屏幕点亮且解锁")
         raise RuntimeError(err or "读取手机剪贴板失败")
-    # app_process 输出可能带 Warnings 行，只取非空正文；结尾统一去掉一个换行
+    # 只去掉尾部换行：内容自身的换行必须原样保留，否则多行文本会丢行
     out = r.stdout.strip("\n")
     return out
 
 
 def clipboard_set(serial, text):
-    r = run_adb(f"shell {CLIP_BIN} {_shell_quote(text)}", timeout=15, serial=serial)
+    """写手机剪贴板（文本经 stdin 直传，可安全承载多行）。
+
+    ⚠️ 不要把 text 拼进 adb shell 的命令行：adb shell 转发的是一条按行解析的命令串，
+    文本里的换行会被设备端 shell 当成分隔符，第二行起被当作**独立命令**执行
+    （报 `xxx: inaccessible or not found`），结果只有第一行写进剪贴板；而这截残值
+    又会被同步线程当成"手机端有新内容"回写，把 Mac 剪贴板也改成一行。
+    统一走 stdin，由设备端 clip-stdin 脚本 `$(cat)` 取全文再调 clip。
+    """
+    if run_adb(f"shell [ -x {CLIP_STDIN_BIN} ]", serial=serial).returncode != 0:
+        _push_clip_stdin(serial)
+    argv = ["adb"] + (["-s", serial] if serial else []) + ["shell", CLIP_STDIN_BIN]
+    r = subprocess.run(argv, input=text.encode("utf-8"),
+                       capture_output=True, timeout=15)
     if r.returncode != 0:
-        err = (r.stderr or "").strip()
+        err = r.stderr.decode("utf-8", "replace").strip()
         if "does not have foreground focus" in err or "clipboard" in err.lower():
             raise RuntimeError("设备剪贴板不可写：请确保手机屏幕点亮且解锁")
         raise RuntimeError(err or "写入手机剪贴板失败")
@@ -421,16 +471,6 @@ class ClipboardSync:
             })
             del self.history[CLIP_HISTORY_LIMIT:]
 
-    @staticmethod
-    def _md5_bytes(b):
-        import hashlib
-        return hashlib.md5(b).hexdigest()
-
-    @staticmethod
-    def _md5_bytes(b):
-        import hashlib
-        return hashlib.md5(b).hexdigest()
-
     def _run(self):
         while not self._stop.wait(self.interval):
             try:
@@ -472,7 +512,17 @@ class ClipboardSync:
                 self.last_phone = phone_now
                 if mac_now and mac_now != self.last_mac and mac_now != self.last_phone:
                     # Mac 复制了新内容 → 同步到手机
-                    clipboard_set(serial, mac_now)
+                    try:
+                        clipboard_set(serial, mac_now)
+                    except Exception:
+                        # 写入失败时手机剪贴板可能已被写入一半（历史上多行文本就踩过这个坑：
+                        # 只写进第一行，剩余行报错）。必须立刻重读手机侧刷新基线，
+                        # 否则下一轮会把那截残值当成"手机端新内容"回写，反过来污染 Mac 剪贴板。
+                        try:
+                            self.last_phone = clipboard_get(serial)
+                        except Exception:
+                            self.last_phone = None
+                        raise
                     self.last_phone = mac_now
                     self.add_history("mac", mac_now, serial)
                 self.last_mac = mac_now
