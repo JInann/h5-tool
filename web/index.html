@@ -202,14 +202,35 @@
     width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
   }
 
+  /* ===== Toast（瞬时提示，替代弹窗里常驻的提示行，省空间） ===== */
+  #toastBox {
+    position: fixed; right: 18px; bottom: 18px; z-index: 99999;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+    pointer-events: none;   /* 不挡下层操作 */
+  }
+  .toast {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    font-size: 12.5px; line-height: 1.5; padding: 8px 14px; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .35); max-width: 380px;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .toast.in { opacity: 1; transform: none; }
+  .toast.ok { border-color: var(--ok); color: var(--ok); }
+  .toast.err { border-color: var(--err); color: var(--err); }
+  .toast.warn { border-color: var(--warn); color: var(--warn); }
+
   /* 弹窗默认尺寸 */
   #modClip .mod-card { width: 440px; height: 520px; }
   #modFile .mod-card { width: 440px; height: 460px; }
   #modApk .mod-card { width: 440px; height: 460px; }
-  #modMirror .mod-card { width: 540px; height: 720px; }
+  #modMirror .mod-card { width: 460px; height: 700px; }
   #modPort .mod-card { width: 360px; height: 340px; }
   #modClaude .mod-card { width: 440px; height: 470px; }
   #modCfg .mod-card { width: 480px; height: 600px; }
+  /* 镜像弹窗：内容贴边，压缩留白（竖屏画面窄，窗口开太宽也是空的） */
+  #modMirror .mod-body { padding: 10px 12px; }
+  #modMirror .msg { margin-top: 4px; }
 
   /* ===== 模块内容通用 ===== */
   .msg { font-size: 12px; margin-top: 8px; min-height: 16px; }
@@ -269,27 +290,59 @@
   .hist-item .hd:hover { color: var(--err); }
 
   /* 屏幕镜像（Android + iOS 统一） */
-  .mirror-platform { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-shrink: 0; }
-  .mirror-platform .mp-label { font-size: 12px; color: var(--muted); }
-  .mirror-platform .mp-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); }
-  .mirror-platform .mp-tag.android { color: var(--ok); border-color: var(--ok); }
-  .mirror-platform .mp-tag.ios { color: var(--accent); border-color: var(--accent); }
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
-  .toolbar button { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
-  .fps { font-size: 12px; color: var(--muted); }
-  #screenWrap { display: flex; flex-direction: column; align-items: center; flex: 1; min-height: 0; }
+  /* 设备平台标签并入标题栏，省掉独立占一行 */
+  .mod-bar .mp-tag {
+    font-size: 11px; padding: 1px 8px; border-radius: 10px;
+    border: 1px solid var(--border); color: var(--muted);
+  }
+  .mod-bar .mp-tag.android { color: var(--ok); border-color: var(--ok); }
+  .mod-bar .mp-tag.ios { color: var(--accent); border-color: var(--accent); }
+  /* fps 放标题栏；错误信息可能很长，自动省略，别把标题栏撑爆 */
+  .mod-bar .fps {
+    font-size: 11.5px; color: var(--muted); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    max-width: 190px; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* 画面区：横向排列 [镜像画面] [侧边按键列]。frame 的具体尺寸由 fitScreen()
+     按视频比例算，保证「画面显示尺寸 == frame 尺寸」——点击坐标映射才准确。
+     初始宽度先让出右侧按键列的位置（50px = 按钮 40 + gap 10），首帧后由 JS 接管。 */
+  #screenWrap {
+    display: flex; flex-direction: row; align-items: center; justify-content: center;
+    gap: 10px; flex: 1; min-height: 0; overflow: hidden;
+  }
   #screenFrame {
     position: relative; background: #000; border-radius: 10px; overflow: hidden;
-    border: 1px solid var(--border); line-height: 0; max-width: 100%;
+    border: 1px solid var(--border); line-height: 0;
+    flex: none; width: calc(100% - 50px); height: 100%;
+    display: flex; align-items: center; justify-content: center;
   }
-  #screen { display: block; max-height: 460px; max-width: 100%; cursor: crosshair; }
-  #scrcpyCanvas { display: block; max-height: 460px; max-width: 100%; cursor: crosshair; background: #000; }
+  #screen, #scrcpyCanvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    cursor: crosshair; display: block;
+  }
+  #scrcpyCanvas { background: #000; }
   #tapMark {
     position: absolute; width: 26px; height: 26px; border: 2px solid var(--accent);
     border-radius: 50%; margin: -13px 0 0 -13px; pointer-events: none; opacity: 0;
     transition: opacity .1s; box-shadow: 0 0 12px var(--accent);
   }
-  .screen-empty { color: var(--muted); font-size: 13px; line-height: 1.7; padding: 40px 16px; text-align: center; }
+  /* 手机按键列：贴在镜像画面右上角（画面之外），竖向排列，半透明 */
+  .mirror-keys {
+    flex: none; align-self: flex-start;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .mirror-keys button {
+    background: rgba(18, 22, 30, .45); color: #fff; opacity: .72;
+    border: 1px solid rgba(255, 255, 255, .28); border-radius: 999px;
+    width: 40px; height: 32px; padding: 0; font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    transition: opacity .15s, background .15s;
+  }
+  .mirror-keys button:hover { opacity: 1; background: rgba(18, 22, 30, .72); }
+  .mirror-keys button:active { transform: scale(.96); }
+  .screen-empty { color: var(--muted); font-size: 13px; line-height: 1.7; padding: 40px 16px; text-align: center; max-width: 100%; }
   /* iOS 镜像分支 */
   .mirror-ios-row { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .mirror-ios-row button { padding: 7px 13px; }
@@ -435,32 +488,23 @@
 <!-- ===== 弹窗：屏幕镜像（Android + iOS 统一） ===== -->
 <div class="mod-modal" id="modMirror" hidden data-page-node-id="BcRuKNsRXTHiyN3oPqPpAj">
   <div class="mod-card" data-page-node-id="fQU3vdwqMCyPHHVaOVgysb">
-    <div class="mod-bar" data-page-node-id="zsxyisFECnyIJfSUjKzZ2H"><span class="mod-title" data-page-node-id="4zuNERwkFz35wtPGUNjbPg">📺 屏幕镜像</span><span class="mod-grow" data-page-node-id="rN0ECyS93AY2zYFnakHxbS"></span><button class="mod-close" data-close data-page-node-id="k7HKh0fJOXIBhgS6VFKiIo">✕</button></div>
+    <div class="mod-bar" data-page-node-id="zsxyisFECnyIJfSUjKzZ2H"><span class="mod-title" data-page-node-id="4zuNERwkFz35wtPGUNjbPg">📺 屏幕镜像</span><span class="mp-tag" id="mirrorPlatformTag" data-page-node-id="b4PnzNMEBCB11x9VWFf7jr">—</span><span class="mod-grow" data-page-node-id="rN0ECyS93AY2zYFnakHxbS"></span><span class="fps" id="fpsLabel" data-page-node-id="Tp64uFxToJemloZH1J1Tri"></span><button class="mod-close" data-close data-page-node-id="k7HKh0fJOXIBhgS6VFKiIo">✕</button></div>
     <div class="mod-body" id="mirrorBody" data-page-node-id="1PAfsXuZAKzb2Uu2HYJHP5">
-      <div class="mirror-platform" data-page-node-id="WvgQZOc8f0y9NjXhLNdC7d">
-        <span class="mp-label" data-page-node-id="DuSoIQbAkZE8IzzOyFOBMr">当前设备</span>
-        <span class="mp-tag" id="mirrorPlatformTag" data-page-node-id="b4PnzNMEBCB11x9VWFf7jr">—</span>
-      </div>
       <!-- Android 分支：scrcpy / PNG 镜像 -->
       <div id="mirrorAndroid" style="display:flex;flex-direction:column;flex:1;min-height:0;" data-page-node-id="XNePhPKffU5WiXYAfu3qhu">
-        <div class="toolbar" data-page-node-id="U0Zs3dtxFymQXtL59fCY9U">
-          <button id="btnLive" data-page-node-id="V5D1QPOjOc7le8fwyhlPXJ">▶ 开始镜像</button>
-          <button class="ghost" id="btnShot" data-page-node-id="5TOd5bVw00B1XQleAjOA29">截图并复制</button>
-          <button class="ghost" id="btnShotDl" disabled data-page-node-id="E4KqE9hcmlIspEhfP6Ubf1">下载 PNG</button>
-          <button class="ghost" id="btnBack" data-page-node-id="HIELzSZTmsXVB3tF2x89kz">← 返回</button>
-          <button class="ghost" id="btnHome" data-page-node-id="LYyPDEflUDi9fD6ZjtTn0b">⌂ 主页</button>
-          <span class="fps" id="fpsLabel" data-page-node-id="Tp64uFxToJemloZH1J1Tri"></span>
-        </div>
-        <div class="msg" id="shotMsg" style="text-align:center;" data-page-node-id="pXFkzCoeBF4HXEm8bgaPjh"></div>
         <div id="screenWrap" data-page-node-id="NiAJPFTSX8QGjzMki5ML3O">
           <div id="screenFrame" data-page-node-id="XEGkMLO48BRNNMZSVTIHLi">
             <canvas id="scrcpyCanvas" alt="屏幕镜像" style="display:none;" data-page-node-id="QY32mbaMjwESQjamtV8Azu"></canvas>
             <img id="screen" alt="屏幕镜像" style="display:none;" data-page-node-id="uuferhajdUqmJAJ07FeYCD" />
             <div id="tapMark" data-page-node-id="9WyawKCb8SK2UBsOpmeyHI"></div>
-            <div class="screen-empty" id="screenEmpty" data-page-node-id="sEPoRf6CC0aBWRqdN7ZerQ">点击「开始镜像」实时查看手机屏幕。<br data-page-node-id="6toa9hUjdP5Y4GQommoaW5">支持 WebCodecs 的浏览器（Chrome / Edge）走 scrcpy 硬件编码，30–60fps 低延迟；<br data-page-node-id="uWA4R0PFuNBOPR8J0qpPer">在画面上点击 = 模拟点击手机，拖动 = 滑动。</div>
+            <div class="screen-empty" id="screenEmpty" data-page-node-id="sEPoRf6CC0aBWRqdN7ZerQ">正在启动镜像…<br data-page-node-id="6toa9hUjdP5Y4GQommoaW5">若一直无画面，确认手机已亮屏解锁、scrcpy 可用。</div>
+          </div>
+          <div class="mirror-keys">
+            <button id="btnShot" title="截图并复制到剪贴板" data-page-node-id="5TOd5bVw00B1XQleAjOA29">📋</button>
+            <button id="btnBack" title="手机返回键" data-page-node-id="HIELzSZTmsXVB3tF2x89kz">←</button>
+            <button id="btnHome" title="手机主页键" data-page-node-id="LYyPDEflUDi9fD6ZjtTn0b">⌂</button>
           </div>
         </div>
-        <div class="hint" style="text-align:center;" data-page-node-id="LIbgA4YyZBnZ2rgb1CnYUY">画面点击映射为设备真实坐标；按住拖动可滑动/滚动页面。</div>
       </div>
       <!-- iOS 分支：pmd3 serve-web viewer -->
       <div id="mirrorIos" style="display:none;flex-direction:column;flex:1;min-height:0;" hidden data-page-node-id="3hSEctrxfIlPUoIaKyJTZv">
@@ -471,7 +515,7 @@
         </div>
         <div class="mirror-msg" id="iosMirrorMsg" hidden data-page-node-id="KPAODIQTBhMdWF3wW3DerY"></div>
         <div class="mirror-ios-frame" data-page-node-id="hPPv43pEIwgnPLkWtta4IJ"><iframe id="iosMirrorFrame" data-page-node-id="EWGFQCRnBKIf1nAEb18mJf"></iframe></div>
-        <div class="mirror-tip" data-page-node-id="AXREGockzzTIGT78vIercV">屏幕流需 iPhone 系统 iOS 27+（iOS 26 及更早不开放 displayservice，换机无用）；首次连接需 10~40 秒（起隧道 + 设备开媒体流）。Windows 浏览器需支持 HEVC 解码（Chrome/Edge 需系统「HEVC 视频扩展」，Safari 无需）。点画面=点击，按住拖动=滑动。</div>
+        <div class="mirror-tip" data-page-node-id="AXREGockzzTIGT78vIercV">需 iOS 27+（iOS 26 及更早不开放 displayservice）；首次连接 10~40 秒。Windows 浏览器需 HEVC 扩展。点画面=点击，按住拖动=滑动。</div>
       </div>
     </div>
     <div class="mod-resize" data-page-node-id="ZRYEeeHG0KgFvBCM9nc19A"></div>
@@ -610,6 +654,25 @@ function truncate(s, n) {
 function setMsg(el, text, ok) {
   el.textContent = text;
   el.className = "msg " + (ok ? "ok" : "err");
+}
+
+/* 右下角 toast：瞬时反馈用它，不再在弹窗里占一行常驻提示 */
+function toast(text, type) {
+  let box = document.getElementById("toastBox");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "toastBox";
+    document.body.appendChild(box);
+  }
+  const el = document.createElement("div");
+  el.className = "toast" + (type ? " " + type : "");
+  el.textContent = text;
+  box.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("in"));
+  setTimeout(() => {
+    el.classList.remove("in");
+    setTimeout(() => el.remove(), 260);
+  }, 2400);
 }
 
 const targets = {};
@@ -1084,11 +1147,15 @@ function openModal(id) {
     card.style.top = Math.max(8, (window.innerHeight - h) / 2) + "px";
   }
   bringToFront(modal);
+  // 镜像弹窗：等布局就绪后按当前可用空间摆画面（不然首次打开画面尺寸是老的）
+  if (id === "modMirror" && typeof fitScreen === "function") requestAnimationFrame(fitScreen);
   if (window.__onModalOpen) window.__onModalOpen(id);
 }
 function closeModal(id) {
   const modal = document.getElementById(id);
   if (modal) modal.hidden = true;
+  // 镜像弹窗：关闭即停流，否则后台一直解码/轮询浪费资源
+  if (id === "modMirror" && typeof mirrorAutoStop === "function") mirrorAutoStop();
 }
 
 document.querySelectorAll(".mod-modal").forEach((modal) => {
@@ -1097,7 +1164,7 @@ document.querySelectorAll(".mod-modal").forEach((modal) => {
   const resize = modal.querySelector(".mod-resize");
   const closeBtn = modal.querySelector("[data-close]");
   // 关闭（仅 ✕ 按钮；无遮罩，不再点空白处关闭）
-  if (closeBtn) closeBtn.addEventListener("click", () => { modal.hidden = true; });
+  if (closeBtn) closeBtn.addEventListener("click", () => closeModal(modal.id));
   // 点击卡片任意位置 → 置顶（捕获阶段，拖动/缩放前即生效）
   card.addEventListener("pointerdown", () => bringToFront(modal), true);
   // 拖动（标题栏）
@@ -1133,6 +1200,9 @@ document.querySelectorAll(".mod-modal").forEach((modal) => {
       const h = Math.max(180, rs.h + (e.clientY - rs.y));
       card.style.width = Math.min(w, window.innerWidth - rect.left) + "px";
       card.style.height = Math.min(h, window.innerHeight - rect.top) + "px";
+      // 用户手动调过尺寸 → 本会话不再自动按比例适配；画面跟着新尺寸重算
+      if (modal.id === "modMirror") card.dataset.userSized = "1";
+      if (typeof fitScreen === "function") fitScreen();
     });
     const endRs = () => { rs = null; };
     resize.addEventListener("pointerup", endRs);
@@ -1141,7 +1211,7 @@ document.querySelectorAll(".mod-modal").forEach((modal) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    document.querySelectorAll(".mod-modal").forEach((m) => { if (!m.hidden) m.hidden = true; });
+    document.querySelectorAll(".mod-modal").forEach((m) => { if (!m.hidden) closeModal(m.id); });
   }
 });
 
@@ -1556,7 +1626,6 @@ const FPS = 3, INTERVAL = 1000 / FPS;
 const HAS_WC = !!(window.VideoDecoder && window.VideoFrame && window.EncodedVideoChunk);
 let engine = null, videoSize = { w: 0, h: 0 };
 let scrcpyPlayer = null, scrcpyFrameCount = 0, scrcpyFpsTimer = null;
-let lastPngBlob = null;
 
 async function grabScreenshot() {
   const res = await fetch(apiUrlDev("/api/screenshot?t=" + Date.now()), fetchOpts());
@@ -1570,7 +1639,7 @@ async function copyBlobToClipboard(blob) {
 function showFrame(blob) {
   lastBlob = blob;
   const url = URL.createObjectURL(blob);
-  screenEl.onload = () => { if (curObjUrl) URL.revokeObjectURL(curObjUrl); curObjUrl = url; };
+  screenEl.onload = () => { if (curObjUrl) URL.revokeObjectURL(curObjUrl); curObjUrl = url; fitScreen(); };
   screenEl.src = url;
   screenEl.style.display = "block";
   screenEmpty.style.display = "none";
@@ -1593,6 +1662,87 @@ function toDeviceCoords(clientX, clientY) {
   const ny = (clientY - rect.top) / rect.height;
   return { x: Math.round(nx * (intr.w || 1)), y: Math.round(ny * (intr.h || 1)) };
 }
+
+/* ---------- 画面适配 + 弹窗尺寸自适应 ----------
+   竖屏手机画面很窄，弹窗若固定宽度，画面左右会空一大片。所以：
+   1) 首次打开、还不知道设备尺寸时，用 CSS 里的预设尺寸
+   2) 拿到首帧真实分辨率后，按比例把弹窗收窄到刚好容纳「画面 + 右侧按键列」，并缓存比例
+   3) 下次打开直接用缓存比例摆好，不必等首帧
+   用户手动拖过缩放手柄后，本次会话不再自动改（dataset.userSized）。 */
+const LS_MIRROR_ASPECT = "h5tool.mirror.aspect";
+const MIRROR_KEYS_W = 50;      // 右侧按键列：按钮 40 + gap 10（与 CSS 对应）
+const MIRROR_BODY_PAD = 24;    // #modMirror .mod-body 左右 padding 合计
+let _mirrorAspectDone = 0;     // 已按哪个比例适配过弹窗，避免重复
+
+function _mirrorAspectKey() { return LS_MIRROR_ASPECT + "." + (device || "default"); }
+function loadMirrorAspect() {
+  try {
+    const v = parseFloat(localStorage.getItem(_mirrorAspectKey())
+      || localStorage.getItem(LS_MIRROR_ASPECT) || "");
+    return (v > 0.2 && v < 3) ? v : 0;
+  } catch (e) { return 0; }
+}
+function saveMirrorAspect(a) {
+  if (!(a > 0.2 && a < 3)) return;
+  try {
+    localStorage.setItem(_mirrorAspectKey(), String(a));
+    localStorage.setItem(LS_MIRROR_ASPECT, String(a));
+  } catch (e) {}
+}
+
+/* 按画面比例收窄弹窗宽度（只改 card 尺寸，画面交给随后的 fitScreen 算） */
+function fitMirrorCard(aspect) {
+  const card = document.querySelector("#modMirror .mod-card");
+  if (!card || !aspect) return;
+  if (card.dataset.userSized === "1") return;   // 用户手动调过，尊重他的选择
+  const bar = card.querySelector(".mod-bar");
+  const barH = bar ? bar.offsetHeight : 40;
+  const h = Math.min(card.offsetHeight || 700, window.innerHeight - 60);
+  const innerH = Math.max(80, h - barH - 20);   // 20 = body 上下 padding
+  const w = Math.round(innerH * aspect) + MIRROR_KEYS_W + MIRROR_BODY_PAD + 2;
+  card.style.height = Math.round(h) + "px";
+  card.style.width = Math.max(240, Math.min(w, window.innerWidth - 32)) + "px";
+}
+
+/* 让画面按视频比例填满可用空间（弹窗缩放 / 窗口缩放 / 首帧到达时重算）。
+   要点：frame 尺寸 == 画面显示尺寸 —— toDeviceCoords 与 flashTap 都基于它的
+   getBoundingClientRect 做比例换算，两者对齐点击坐标才准。 */
+function fitScreen() {
+  const wrap = $("screenWrap");
+  if (!wrap) return;
+  const intr = activeIntrinsic();
+  if (!intr.w || !intr.h) return;
+
+  // 拿到真实分辨率：缓存比例 + 按比例收一次弹窗（同一比例只做一次）
+  const aspect = intr.w / intr.h;
+  if (Math.abs(aspect - _mirrorAspectDone) > 0.005) {
+    _mirrorAspectDone = aspect;
+    saveMirrorAspect(aspect);
+    fitMirrorCard(aspect);
+  }
+
+  const keys = wrap.querySelector(".mirror-keys");
+  const availW = wrap.clientWidth - (keys ? keys.offsetWidth + 10 : 0);
+  const availH = wrap.clientHeight;
+  if (availW <= 0 || availH <= 0) return;
+  const scale = Math.min(availW / intr.w, availH / intr.h);
+  const frame = $("screenFrame");
+  frame.style.width = Math.max(1, Math.round(intr.w * scale)) + "px";
+  frame.style.height = Math.max(1, Math.round(intr.h * scale)) + "px";
+
+  // 按键列贴住画面右上角：画面在可用空间里居中时，它的顶部会低于容器顶部，
+  // 用 margin-top 把这一段落差补上，按键才和画面上边缘齐平。
+  if (keys) {
+    const wr = wrap.getBoundingClientRect(), fr = frame.getBoundingClientRect();
+    keys.style.marginTop = Math.max(0, Math.round(fr.top - wr.top)) + "px";
+  }
+}
+window.addEventListener("resize", () => {
+  const m = $("modMirror");
+  if (!m || m.hidden) return;
+  _mirrorAspectDone = 0;      // 窗口尺寸变了，允许按比例重算一次
+  fitScreen();
+});
 
 function createScrcpyPlayer(canvasTarget, ctx) {
   let decoder = null, reader = null;
@@ -1640,7 +1790,7 @@ function createScrcpyPlayer(canvasTarget, ctx) {
       const codec = codecOf(sps);
       decoder = new VideoDecoder({
         output: (frame) => {
-          if (!videoSize.w) videoSize = { w: frame.displayWidth, h: frame.displayHeight };
+          if (!videoSize.w) { videoSize = { w: frame.displayWidth, h: frame.displayHeight }; fitScreen(); }
           if (canvasTarget.width !== frame.displayWidth || canvasTarget.height !== frame.displayHeight) {
             canvasTarget.width = frame.displayWidth; canvasTarget.height = frame.displayHeight;
           }
@@ -1684,7 +1834,7 @@ function createScrcpyPlayer(canvasTarget, ctx) {
       stop();
     }
     if (living && engine === "scrcpy") {
-      $("fpsLabel").textContent = "✗ scrcpy 流中断，已降级到 PNG 镜像";
+      toast("scrcpy 流中断，已降级到 PNG 镜像", "warn");
       startLegacyEngine();
     }
   }
@@ -1705,7 +1855,7 @@ function startScrcpyEngine() {
   scrcpyPlayer = createScrcpyPlayer(canvasEl, scrcpyCtx);
   scrcpyPlayer.start().catch((e) => {
     console.error("[scrcpy] start failed", e);
-    $("fpsLabel").textContent = "✗ scrcpy 启动失败，已降级到 PNG 镜像";
+    toast("scrcpy 启动失败，已降级到 PNG 镜像", "warn");
     if (living) startLegacyEngine();
   });
   scrcpyFpsTimer = setInterval(() => {
@@ -1735,52 +1885,37 @@ async function liveLoop() {
   const elapsed = performance.now() - t0;
   liveTimer = setTimeout(liveLoop, Math.max(0, INTERVAL - elapsed));
 }
+function startLiveAndroid() {
+  if (living) return;
+  living = true;
+  if (HAS_WC) startScrcpyEngine();
+  else startLegacyEngine();
+}
 function stopLiveAndroid() {
   if (engine === "scrcpy" && scrcpyPlayer) { scrcpyPlayer.stop(); scrcpyPlayer = null; }
   if (engine === "legacy") clearTimeout(liveTimer);
   if (scrcpyFpsTimer) { clearInterval(scrcpyFpsTimer); scrcpyFpsTimer = null; }
   engine = null;
   living = false;
-  $("btnLive").textContent = "▶ 开始镜像";
-  $("fpsLabel").textContent = "";
+  const fps = $("fpsLabel");
+  if (fps) fps.textContent = "";
 }
-$("btnLive").onclick = () => {
-  living = !living;
-  $("btnLive").textContent = living ? "⏸ 停止镜像" : "▶ 开始镜像";
-  if (living) {
-    if (HAS_WC) startScrcpyEngine();
-    else startLegacyEngine();
-  } else {
-    stopLiveAndroid();
-  }
-};
 $("btnShot").onclick = async () => {
   $("btnShot").disabled = true;
-  setMsg($("shotMsg"), "截图中…", true);
+  toast("截图中…");
   try {
     const blob = await grabScreenshot();
-    lastPngBlob = blob;
-    $("btnShotDl").disabled = false;
     try {
       await copyBlobToClipboard(blob);
-      setMsg($("shotMsg"), "✓ 已截图并复制到剪贴板", true);
+      toast("已截图并复制到剪贴板", "ok");
     } catch (e) {
-      setMsg($("shotMsg"), "✓ 已截图（复制失败：" + e.message + "）", false);
+      toast("已截图，但复制失败：" + e.message, "warn");
     }
   } catch (e) {
-    setMsg($("shotMsg"), "✗ " + e.message, false);
+    toast("截图失败：" + e.message, "err");
   } finally {
     $("btnShot").disabled = false;
   }
-};
-$("btnShotDl").onclick = () => {
-  if (!lastPngBlob) return;
-  const url = URL.createObjectURL(lastPngBlob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "screenshot-" + Date.now() + ".png";
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function flashTap(clientX, clientY) {
   const frameRect = $("screenFrame").getBoundingClientRect();
@@ -1825,6 +1960,14 @@ async function sendKey(code) {
 }
 $("btnBack").onclick = () => sendKey(4);
 $("btnHome").onclick = () => sendKey(3);
+// 画面底部浮层（截图/返回/主页）叠在画面里，必须拦住 mousedown/mouseup，
+// 否则会被 screenFrame 的监听当成"点击画面"，在手机上也跟着点一下
+["btnShot", "btnBack", "btnHome"].forEach((id) => {
+  const b = $(id);
+  if (!b) return;
+  b.addEventListener("mousedown", (e) => e.stopPropagation());
+  b.addEventListener("mouseup", (e) => e.stopPropagation());
+});
 
 /* ---------- iOS 分支：pmd3 serve-web viewer ---------- */
 let _mirrorTimer = null, _mirrorBusy = false;
@@ -1957,29 +2100,48 @@ function applyMirrorPlatform() {
     iosBox.style.display = "flex";
     tag.textContent = "iOS";
     tag.className = "mp-tag ios";
-    stopLiveAndroid();
+    if (living) stopLiveAndroid();   // 从 Android 分支切过来才需要停
     refreshIosMirrorState();
   } else {
+    if (!iosBox.hidden) stopIosMirror();  // 从 iOS 分支切过来才需要停
     iosBox.hidden = true;
     iosBox.style.display = "none";
     androidBox.style.display = "flex";
     tag.textContent = "Android";
     tag.className = "mp-tag android";
-    stopIosMirror();
   }
 }
-// 打开镜像弹窗时按当前设备渲染对应分支
+
+/* ---------- 自动启停：打开弹窗即开流，关闭即停（所以不需要开关按钮） ---------- */
+function mirrorAutoStart() {
+  applyMirrorPlatform();
+  // 有缓存比例就先按它把弹窗摆好（不用等首帧）；没有则维持 CSS 预设尺寸
+  if (currentPlatform() !== "ios") {
+    const a = loadMirrorAspect();
+    if (a) { _mirrorAspectDone = a; fitMirrorCard(a); }
+  }
+  if (currentPlatform() === "ios") iosMirrorStart();
+  else startLiveAndroid();
+}
+function mirrorAutoStop() {
+  stopLiveAndroid();
+  if (currentPlatform() === "ios") stopIosMirror();
+}
+// 打开镜像弹窗：渲染对应分支 + 自动开流
 const _origOnModalOpen2 = window.__onModalOpen;
 window.__onModalOpen = function (id) {
   if (_origOnModalOpen2) _origOnModalOpen2(id);
-  if (id === "modMirror") applyMirrorPlatform();
+  if (id === "modMirror") mirrorAutoStart();
 };
-// 设备切换时，若镜像弹窗开着则同步分支
+// 设备切换时，若镜像弹窗开着：先停旧设备的流，再按新设备重开
 const _origOnDeviceChange = window.__onDeviceChange;
 window.__onDeviceChange = function () {
   if (_origOnDeviceChange) _origOnDeviceChange();
   const mirrorModal = $("modMirror");
-  if (mirrorModal && !mirrorModal.hidden) applyMirrorPlatform();
+  if (!mirrorModal || mirrorModal.hidden) return;
+  stopLiveAndroid();
+  stopIosMirror();
+  mirrorAutoStart();
 };
 
 /* ---------- 快捷修改地址（吸底常驻，发送链接到手机） ---------- */
