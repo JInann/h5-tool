@@ -30,6 +30,7 @@
   "files": [
     "bin/",
     "server.py",
+    "mcp_server.py",
     "cdp.py",
     "ios_bridge.py",
     "scr_stream.py",
