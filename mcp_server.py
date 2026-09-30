@@ -35,8 +35,12 @@ def _get(path, device=None):
         return r.read(), r.headers.get("Content-Type", "")
 
 
-def _post(path, payload, device=None):
-    data = json.dumps(payload).encode("utf-8")
+def _post(path, payload, device=None, sock=None):
+    body = dict(payload)
+    if sock:
+        # socket：多 App 并存时指定操作哪个 App 的 WebView（不传则用默认的）
+        body["socket"] = sock
+    data = json.dumps(body).encode("utf-8")
     url = f"{BASE}{path}"
     if device:
         sep = "&" if "?" in url else "?"
@@ -140,19 +144,44 @@ def h5_type_text(text: str, device: str = None) -> str:
 
 
 @mcp.tool()
-def h5_navigate(url: str, device: str = None) -> str:
-    """让指定设备（默认第一台）当前 WebView 导航到指定 H5 链接（自动补全 https://）。"""
+def h5_navigate(url: str, device: str = None, socket: str = None) -> str:
+    """让指定设备（默认第一台）当前 WebView 导航到指定 H5 链接（自动补全 https://）。
+
+    手机上有多个 App 同时开着 WebView 时，用 socket 指定给哪个 App 导航
+    （socket 名从 h5_webview_targets 拿）；不传则用默认（第一个有页面的）App。
+    """
     try:
-        return _post("/api/navigate", {"url": url}, device)
+        return _post("/api/navigate", {"url": url}, device, socket)
     except Exception as e:
         return f"导航失败：{e}"
 
 
 @mcp.tool()
-def h5_eval(expression: str, device: str = None) -> str:
-    """在指定设备（默认第一台）WebView 当前页面上下文执行 JS，返回 {value,type}。"""
+def h5_webview_targets(device: str = None) -> str:
+    """列出设备上所有可调试的 WebView 页面，**按 App 分组**（多 App 同时可见）。
+
+    返回 JSON：{device, apps: [{socket, package, port, targets: [{id,title,url,type}], error}],
+     phone_error}。同一台手机可能同时开着多个 App 的 WebView（他ta星球 / 抖你 / …），
+    每个 App 一组、各自独立；要操作其中某个 App 的页面时，把它那一组的 socket
+    传给 h5_eval / h5_navigate 即可。某个 App 的 WebView 被系统冻结时，
+    只在该组的 error 里体现（不会影响其它 App）。
+    """
     try:
-        return _post("/api/eval", {"expression": expression}, device)
+        body, _ = _get("/api/webview-targets", device)
+        return body.decode("utf-8", "replace")
+    except Exception as e:
+        return f"获取 WebView 目标失败：{e}（h5-tool 后端未启动？）"
+
+
+@mcp.tool()
+def h5_eval(expression: str, device: str = None, socket: str = None) -> str:
+    """在指定设备（默认第一台）WebView 当前页面上下文执行 JS，返回 {value,type}。
+
+    手机上有多个 App 同时开着 WebView 时，用 socket 指定在哪个 App 里执行
+    （socket 名从 h5_webview_targets 拿）；不传则用默认（第一个有页面的）App。
+    """
+    try:
+        return _post("/api/eval", {"expression": expression}, device, socket)
     except Exception as e:
         return f"执行 JS 失败：{e}"
 

@@ -698,7 +698,7 @@ async function load(showLoading) {
   const isIos = String(device || "").startsWith("ios");
   setSection(isIos ? "ios" : "android");
   if (isIos) renderIosList(data.ios);
-  else renderList("phoneList", "dotPhone", data.phone, data.phone_error);
+  else renderAndroidList(data);
 }
 
 function targetCard(t, badge) {
@@ -716,16 +716,54 @@ function targetCard(t, badge) {
   );
 }
 
-function renderList(listId, dotId, list, err) {
-  const el = $(listId);
-  const dot = $(dotId);
-  dot.className = "dot" + (list && list.length ? " on" : "");
-  if (err) { el.innerHTML = '<div class="err">' + escapeHtml(err) + "</div>"; return; }
-  if (!list || !list.length) { el.innerHTML = '<div class="empty">无可调试目标</div>'; return; }
-  el.innerHTML = list
-    .filter((t) => t.ws)
-    .map((t) => { targets[t.id] = t; return targetCard(t, t.type || "page"); })
-    .join("");
+function appShort(pkg, fallback) {
+  const s = pkg || fallback || "";
+  return s ? (s.split(".").pop() || s) : "App";
+}
+
+// Android 目标列表：一台设备上可能同时开着多个 App 的 WebView（他ta星球 / 抖你 …），
+// 按 App 分组展示，每组独立；点开走各自的 CDP 端口，互不干扰。
+function renderAndroidList(data) {
+  const el = $("phoneList");
+  const dot = $("dotPhone");
+  const list = ((data && data.phone) || []).filter((t) => t.ws);
+  dot.className = "dot" + (list.length ? " on" : "");
+  if (data && data.phone_error && !list.length) {
+    el.innerHTML = '<div class="err">' + escapeHtml(data.phone_error) + "</div>";
+    return;
+  }
+  if (!list.length) { el.innerHTML = '<div class="empty">无可调试目标</div>'; return; }
+
+  const groups = ((data && data.apps) || []).filter((a) => (a.targets || []).some((t) => t.ws));
+  // 单 App（或后端未返回 apps 分组）→ 扁平渲染，保持原来的简洁观感
+  if (groups.length <= 1) {
+    el.innerHTML = list.map((t) => {
+      targets[t.id] = t;
+      return targetCard(t, appShort(t.package, t.type));
+    }).join("");
+    return;
+  }
+
+  const empty = ((data && data.apps) || []).filter(
+    (a) => !(a.targets || []).some((t) => t.ws)
+  );
+  const tail = empty.length
+    ? '<div class="empty">另有 ' + empty.length + ' 个 App 暂无可调试页面（'
+      + escapeHtml(empty.map((a) => appShort(a.package, a.socket)).join(" / "))
+      + "）——App 切到后台时 WebView 可能被系统冻结，切回前台再看</div>"
+    : "";
+
+  el.innerHTML = groups.map((a) => {
+    const items = (a.targets || []).filter((t) => t.ws);
+    const head =
+      '<div class="dev-group"><span class="dg-id">' + escapeHtml(appShort(a.package, a.socket)) +
+        '</span><span class="dg-app">' + escapeHtml(a.package || a.socket || "") + '</span>' +
+        '<span class="dg-cnt">' + items.length + " 页</span></div>";
+    return head + items.map((t) => {
+      targets[t.id] = t;
+      return targetCard(t, appShort(t.package, t.type));
+    }).join("");
+  }).join("") + tail;
 }
 
 function renderIosList(ios) {
@@ -792,7 +830,8 @@ function setSection(platform) {
   } else {
     hint.innerHTML =
       '点「内嵌打开」在右侧使用完整 DevTools（console / sources 断点 / network / storage / elements）；<br>' +
-      '「新窗口」独立打开。<br>手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。';
+      '「新窗口」独立打开。<br>手机 WebView 需 App 开启 setWebContentsDebuggingEnabled(true)。<br>' +
+      '多个 App 同时开着 WebView 时，列表按 App 分组，可各自打开互不干扰。';
   }
 }
 
@@ -803,7 +842,11 @@ function devtoolsPanelUrl() {
   return loopback ? "/devtools/inspector.html" : "/front_end/inspector.html";
 }
 function devtoolsUrl(t) {
-  const qs = device ? "?device=" + encodeURIComponent(device) : "";
+  const q = [];
+  if (device) q.push("device=" + encodeURIComponent(device));
+  // socket：告诉代理这是哪个 App 的 WebView（多 App 并存时端口不同，必须带上）
+  if (t && t.socket) q.push("socket=" + encodeURIComponent(t.socket));
+  const qs = q.length ? "?" + q.join("&") : "";
   const bare = API_BASE.replace(/^https?:\/\//, "") + "/cdp-ws/" + t.id + qs;
   return devtoolsPanelUrl() + "?ws=" + encodeURIComponent(bare);
 }

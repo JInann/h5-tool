@@ -17,8 +17,10 @@ import shutil
 import socket
 import struct
 import subprocess
+import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 CDP_PORT = 9222
 CDP_SLOTS = 64           # 多设备时 CDP 端口槽位数量（9222 ~ 9222+63）
@@ -122,24 +124,30 @@ def default_serial():
 
 # WebView socket 名缓存：WiFi adb 下 cat /proc/net/unix 走网络很慢（2s+），
 # 而 socket 名在 WebView 存活期间基本不变，缓存可让 status 轮询秒回。
-# 仅在找到时缓存；找不到不缓存，避免误判。
+# 缓存的是【已确认有可调试页面】的那个 socket（多 App 共存时挑对的那个）；
+# 找不到不缓存，避免误判。
 _sock_cache = {}          # serial -> (sock_name, ts)
+_all_cache = {}           # serial -> (names, ts)
 _SOCK_TTL = 8.0
 
 
-def find_webview(serial, timeout=5):
-    """从指定设备的 /proc/net/unix 中找到当前 WebView 的 devtools socket 名。
+def _all_webviews(serial, timeout=5, use_cache=True):
+    """列出设备上【所有】WebView devtools socket 名（去重，保持 /proc/net/unix 顺序）。
 
     兼容两种命名（部分厂商浏览器会加前缀）：
       - @webview_devtools_remote_<pid>         标准 WebView
       - @browser_webview_devtools_remote_<pid> 小米浏览器等
-    返回去掉 @ 的完整 socket 名（如 webview_devtools_remote_17241），
-    供 adb forward localabstract 使用；找不到返回 None。
+
+    为什么是"所有"：同一台设备上可能同时存在多个 App 的 WebView socket
+    （例如他ta星球 + 抖你 各持一个）。只取第一个会连到错误的 App——
+    该 App 可能进程活着但没打开任何 H5 页面，/json 返回 []，表现为
+    "CDP 未返回任何页面"。所以要把候选都拿出来逐个探测。
     """
     now = time.time()
-    hit = _sock_cache.get(serial)
-    if hit and now - hit[1] < _SOCK_TTL:
-        return hit[0]
+    if use_cache:
+        hit = _all_cache.get(serial)
+        if hit and now - hit[1] < _SOCK_TTL:
+            return list(hit[0])
     for _ in range(timeout):
         try:
             r = run_adb("shell cat /proc/net/unix", timeout=5, serial=serial)
@@ -147,20 +155,157 @@ def find_webview(serial, timeout=5):
             # 设备/ADB 临时不可用（如超时），继续轮询
             time.sleep(0.5)
             continue
+        names, seen = [], set()
         for line in r.stdout.split("\n"):
             if "webview_devtools_remote_" in line and "@" in line:
                 name = line.split("@", 1)[-1].strip()
                 # 形如 webview_devtools_remote_17241 或 browser_webview_devtools_remote_15802
-                if name.split("_")[-1].isdigit():
-                    _sock_cache[serial] = (name, now)
-                    return name
-        time.sleep(0.5)
-    return None
+                if name.split("_")[-1].isdigit() and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+        _all_cache[serial] = (names, now)
+        return names
+    return []
+
+
+def _pkg_of_sock(serial, sock_name):
+    """用 /proc/<pid>/cmdline 读该 socket 所属 App 的包名（兜底手段）。"""
+    pid = sock_name.rsplit("_", 1)[-1]
+    try:
+        r = run_adb(f"shell cat /proc/{pid}/cmdline", timeout=3, serial=serial)
+        return (r.stdout or "").replace("\x00", "").strip()
+    except Exception:
+        return ""
+
+
+def _sock_label(serial, sock_name):
+    """把 socket 名换成可读标签，用于报错定位：webview_devtools_remote_123(com.xxx.app)。"""
+    pkg = _pkg_of_sock(serial, sock_name)
+    return f"{sock_name}({pkg})" if pkg else sock_name
+
+
+def find_webview(serial, timeout=5):
+    """返回设备上第一个 WebView devtools socket 名（兼容旧调用）。
+
+    注意：多 App 共存时这可能是"错误的那个"。建立 CDP 连接请走
+    WebViewCDP.setup()——它会遍历所有候选并挑出真正有页面的那个。
+    """
+    now = time.time()
+    hit = _sock_cache.get(serial)
+    if hit and now - hit[1] < _SOCK_TTL:
+        return hit[0]
+    names = _all_webviews(serial, timeout=timeout)
+    return names[0] if names else None
 
 
 def _http_get_json(url, timeout=5):
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+# ---------- 多 App 支持：每个 WebView App 一个独立 CDP 转发端口 ----------
+# 同一台设备上不同 App 的 WebView 各是一个 devtools socket，要同时调试就得各自
+# forward 到不同的本地端口。端口用 (serial + socket 名) 哈希到固定槽位，保证同一
+# App 每次拿到同一端口（DevTools 链接可复用），并线性探测避开其它设备与其它 App。
+_app_ports = {}          # (serial, sock_name) -> port
+_app_ports_lock = threading.Lock()
+
+
+def app_cdp_port(serial, sock_name, serials=()):
+    """为 (设备, App socket) 分配一个稳定且不冲突的 CDP 转发端口。
+
+    稳定：同一 (serial, sock) 总是返回同一端口（进程存活期间）。
+    不冲突：避开其它设备的基础槽位，也避开本进程内已分配给其它 App 的端口。
+    """
+    key = (serial, sock_name)
+    with _app_ports_lock:
+        got = _app_ports.get(key)
+        if got:
+            return got
+        reserved = set(_app_ports.values())
+        for s in serials:
+            if s != serial:
+                reserved.add(resolve_port(s, CDP_PORT, serials))
+        slot = device_slot(f"{serial}#{sock_name}")
+        for _ in range(CDP_SLOTS):
+            cand = CDP_PORT + slot
+            if cand not in reserved:
+                _app_ports[key] = cand
+                return cand
+            slot = (slot + 1) % CDP_SLOTS
+    raise CDPError(f"CDP 端口槽位耗尽（{CDP_SLOTS} 个已用满）")
+
+
+def app_forward_port(serial, sock_name, serials=()):
+    """确保 (设备, App) 的 adb forward 已建立，返回本地端口（幂等）。"""
+    port = app_cdp_port(serial, sock_name, serials)
+    run_adb(f"forward tcp:{port} localabstract:{sock_name}", serial=serial, timeout=5)
+    return port
+
+
+def _pkg_via_cdp(port, timeout=1.5):
+    """从 CDP /json/version 读 App 包名（比 adb shell 读 cmdline 快，且不受 pid 复用影响）。"""
+    try:
+        v = _http_get_json(f"http://127.0.0.1:{port}/json/version", timeout=timeout)
+        return v.get("Android-Package") or ""
+    except Exception:
+        return ""
+
+
+# 探测单个 App 的超时：够本地 adb 转发往返，又不会让"App 被后台冻结、socket 僵死"
+# 的情况把整个列表拖住（此时请求会一直挂着直到超时）。
+_APP_PROBE_TIMEOUT = 1.8
+
+
+def _probe_app(serial, sock_name, serials):
+    """探测单个 App：建 forward、拉目标列表、读包名。失败只记在该 App 的 error 里。"""
+    item = {"socket": sock_name, "package": "", "port": None,
+            "pages": [], "error": None}
+    try:
+        port = app_forward_port(serial, sock_name, serials)
+    except Exception as e:
+        item["error"] = f"端口分配失败：{e}"
+        return item
+    item["port"] = port
+    try:
+        pages = _http_get_json(f"http://127.0.0.1:{port}/json",
+                               timeout=_APP_PROBE_TIMEOUT)
+    except Exception as e:
+        item["error"] = f"CDP 无响应（{e.__class__.__name__}）"
+        # 兜底：socket 僵死时仍从进程 cmdline 拿到包名，前端至少能显示是哪个 App
+        item["package"] = _pkg_of_sock(serial, sock_name)
+        return item
+    item["pages"] = pages or []
+    item["package"] = _pkg_via_cdp(port) or _pkg_of_sock(serial, sock_name)
+    return item
+
+
+def list_webview_apps(serial, serials=None):
+    """列出设备上**每个** WebView App 及其可调试页面（多 App 同时可见的关键）。
+
+    返回 [{socket, package, port, pages, error}]，每个 App 一条：
+      - pages：该 App 的原始 CDP /json 目标数组（未裁剪，交给调用方精简）
+      - error：该 App 自己的探测错误（不影响其它 App）
+    与 setup() 的区别：setup 只挑一个 App 建会话；本函数把全部 App 都摸一遍，
+    供目标列表同时展示多个 App。
+
+    各 App **并发**探测：某个 App 的 WebView 被系统冻结时 socket 会僵死，
+    串行探测会让整个列表白等好几个超时周期。
+    """
+    if serials is None:
+        serials = [d["serial"] for d in list_devices()]
+    socks = _all_webviews(serial)
+    if not socks:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(socks))) as ex:
+        results = list(ex.map(lambda s: _probe_app(serial, s, serials), socks))
+    # 把"第一个真的有页面的 App"记为默认：/api/status、不带 socket 的 eval/navigate
+    # 都据此直连，不必再逐个探测一遍。
+    for item in results:
+        if item.get("pages"):
+            _sock_cache[serial] = (item["socket"], time.time())
+            break
+    return results
 
 
 class CDPError(Exception):
@@ -290,11 +435,18 @@ class CDPSession:
     """
 
     def __init__(self):
-        self._sessions = {}   # serial -> {"ws_url":..., "current_url":...}
+        self._sessions = {}   # key -> {"ws_url":..., "current_url":..., "socket":..., "port":...}
 
-    def setup(self, serial=None):
+    @staticmethod
+    def _key(serial, sock=None):
+        """会话键：不指定 App 时用 serial（该设备的默认会话），指定时用 serial|socket。"""
+        return f"{serial}|{sock}" if sock else serial
+
+    def setup(self, serial=None, sock=None):
         """建立指定设备（默认第一台）到其 WebView 的 CDP 连接信息（幂等，可重复调用刷新）。
 
+        sock 非空 → 只连这个 App 的 socket（多 App 并存时指定用哪个）。
+        sock 为空 → 遍历设备上所有 App 的 WebView，挑第一个真正有页面的。
         返回 (serial, ws_url)。若传入的 serial 未连接，自动回退到默认设备。
         """
         if serial is None:
@@ -302,51 +454,103 @@ class CDPSession:
         if serial is None:
             raise CDPError("未检测到已连接的设备（adb devices 为空）")
 
-        sock_name = find_webview(serial, timeout=5)
-        if not sock_name:
-            raise CDPError("未找到 WebView（请确保 App 已打开 H5 页面并开启了 WebView 调试）")
-
         serials = [d["serial"] for d in list_devices()]
-        port = resolve_port(serial, CDP_PORT, serials)
-        run_adb(f"forward tcp:{port} localabstract:{sock_name}",
-                serial=serial)
-        time.sleep(0.3)
 
-        try:
-            pages = _http_get_json(f"http://127.0.0.1:{port}/json")
-        except Exception as e:
-            raise CDPError(f"读取 CDP 页面列表失败：{e}")
-        if not pages:
-            raise CDPError("CDP 未返回任何页面")
+        if sock:
+            candidates = [sock]
+        else:
+            candidates = _all_webviews(serial, timeout=5)
+            if not candidates:
+                raise CDPError("未找到 WebView（请确保 App 已打开 H5 页面并开启了 WebView 调试）")
+            # 上次确认有页面的那个 App 优先试（不看 TTL：只要它还在候选里就先试它，
+            # 否则 /proc/net/unix 的顺序可能把"已僵死的 App"排到前面，白白等一个超时）。
+            hit = _sock_cache.get(serial)
+            if hit and hit[0] in candidates:
+                candidates = [hit[0]] + [c for c in candidates if c != hit[0]]
 
-        # 优先选择类型为 page 的目标
-        page_targets = [p for p in pages if p.get("type") == "page"] or pages
-        target = page_targets[0]
-        ws_url = target.get("webSocketDebuggerUrl")
-        if not ws_url:
-            raise CDPError("目标页面没有 webSocketDebuggerUrl")
-        self._sessions[serial] = {
-            "ws_url": ws_url,
-            "current_url": target.get("url", ""),
-        }
-        return serial, ws_url
+        # 逐个候选 socket 探测：同一设备可能有多个 App 的 WebView，
+        # 必须选到真的打开了页面的那个，否则报"未返回任何页面"。
+        # 每个 App 用各自的转发端口，互不覆盖。
+        tried = []
+        for sock_name in candidates:
+            try:
+                port = app_forward_port(serial, sock_name, serials)
+            except Exception as e:
+                tried.append(f"{sock_name} → 端口分配失败: {e}")
+                continue
+            pages = None
+            last_err = None
+            # 先直接请求（forward 通常已就绪，省掉固定等待）；
+            # 失败多半是 forward 刚建好还没生效，等一下再试一次。
+            for attempt in range(2):
+                if attempt:
+                    time.sleep(0.3)
+                try:
+                    pages = _http_get_json(f"http://127.0.0.1:{port}/json",
+                                           timeout=_APP_PROBE_TIMEOUT)
+                    break
+                except Exception as e:
+                    last_err = e
+            if pages is None:
+                tried.append(f"{_sock_label(serial, sock_name)} → 读取失败: {last_err}")
+                continue
+            if not pages:
+                tried.append(f"{_sock_label(serial, sock_name)} → 无打开的页面")
+                continue
 
-    def _session(self, serial):
+            # 优先选择类型为 page 的目标
+            page_targets = [p for p in pages if p.get("type") == "page"] or pages
+            target = page_targets[0]
+            ws_url = target.get("webSocketDebuggerUrl")
+            if not ws_url:
+                tried.append(f"{_sock_label(serial, sock_name)} → 目标页面缺 webSocketDebuggerUrl")
+                continue
+
+            _sock_cache[serial] = (sock_name, time.time())
+            sess = {
+                "ws_url": ws_url,
+                "current_url": target.get("url", ""),
+                "socket": sock_name,
+                "port": port,
+            }
+            self._sessions[self._key(serial, sock)] = sess
+            # 首次连接时登记为该设备的默认会话（供 current_url / status 使用）
+            if serial not in self._sessions:
+                self._sessions[serial] = sess
+            return serial, ws_url
+
+        # 所有候选都失败：清掉"首选 App"记忆，下次重新按当前顺序挑
+        _sock_cache.pop(serial, None)
+        detail = "；".join(tried) if tried else "无候选"
+        if len(candidates) == 1:
+            raise CDPError(f"CDP 未返回任何页面（{detail}）")
+        raise CDPError(
+            f"CDP 未返回任何页面——设备上有 {len(candidates)} 个 WebView，"
+            f"但都没打开页面：{detail}。请确认目标 App 的前台页面已加载 H5。"
+        )
+
+    def socket_of(self, serial=None, sock=None):
+        """返回当前会话对应的 App socket 名（无则 None）。"""
+        _, sess = self._session(serial, sock)
+        return sess.get("socket")
+
+    def _session(self, serial, sock=None):
         """取已建立的会话；未建立则先 setup。serial 为空用默认设备。"""
         if serial is None:
             serial = default_serial()
         if serial is None:
             raise CDPError("未检测到已连接的设备（adb devices 为空）")
-        if serial not in self._sessions:
-            self.setup(serial)
-        return serial, self._sessions[serial]
+        key = self._key(serial, sock)
+        if key not in self._sessions:
+            self.setup(serial, sock=sock)
+        return serial, self._sessions[key]
 
-    def current_url(self, serial=None):
-        _, sess = self._session(serial)
+    def current_url(self, serial=None, sock=None):
+        _, sess = self._session(serial, sock)
         return sess["current_url"]
 
-    def _command(self, method, params=None, serial=None):
-        serial, sess = self._session(serial)
+    def _command(self, method, params=None, serial=None, sock=None):
+        serial, sess = self._session(serial, sock)
         ws = WebSocketClient(sess["ws_url"])
         ws.connect()
         try:
@@ -362,22 +566,22 @@ class CDPSession:
         finally:
             ws.close()
 
-    def command(self, method, params=None, serial=None):
+    def command(self, method, params=None, serial=None, sock=None):
         """执行命令，连接失效时自动重建一次。"""
         try:
-            return self._command(method, params, serial=serial)
+            return self._command(method, params, serial=serial, sock=sock)
         except (OSError, CDPError):
             # WebView 可能已重建（PID 变化），刷新后重试一次
-            self.setup(serial=serial)
-            return self._command(method, params, serial=serial)
+            self.setup(serial=serial, sock=sock)
+            return self._command(method, params, serial=serial, sock=sock)
 
-    def navigate(self, url, serial=None):
-        return self.command("Page.navigate", {"url": url}, serial=serial)
+    def navigate(self, url, serial=None, sock=None):
+        return self.command("Page.navigate", {"url": url}, serial=serial, sock=sock)
 
-    def evaluate(self, expression, serial=None):
+    def evaluate(self, expression, serial=None, sock=None):
         return self.command("Runtime.evaluate", {
             "expression": expression,
             "returnByValue": True,
             "awaitPromise": True,
             "allowUnsafeEvalBlocklistBypass": True,
-        }, serial=serial)
+        }, serial=serial, sock=sock)

@@ -45,7 +45,8 @@ class QuietHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 from cdp import (CDPError, CDPSession, _http_get_json, run_adb, WebSocketClient,
-                 resolve_port, default_serial, list_devices, CDP_PORT, adb_available)
+                 resolve_port, default_serial, list_devices, CDP_PORT, adb_available,
+                 list_webview_apps, app_forward_port, app_cdp_port)
 from scr_stream import StreamError, get_streamer, stop_all
 import ios_bridge
 
@@ -704,18 +705,27 @@ def get_status(serial=None):
     return status
 
 
-def _pick_targets(pages):
-    """精简 CDP /json 返回的 target 字段，避免把大对象全量透传。"""
+def _pick_targets(pages, socket=None, package=None, port=None):
+    """精简 CDP /json 返回的 target 字段，避免把大对象全量透传。
+
+    多 App 场景下带上 socket / package / port——前端据此知道每个页面属于哪个 App，
+    并把 socket 回传给 /cdp-ws 以代理到正确的 App（每个 App 端口不同）。
+    """
     out = []
     for p in pages or []:
-        out.append({
+        item = {
             "id": p.get("id"),
             "title": p.get("title", ""),
             "url": p.get("url", ""),
             "type": p.get("type", ""),
             "ws": p.get("webSocketDebuggerUrl"),
             "frontend": p.get("devtoolsFrontendUrl"),
-        })
+        }
+        if socket:
+            item["socket"] = socket
+            item["package"] = package or ""
+            item["port"] = port
+        out.append(item)
     return out
 
 
@@ -798,24 +808,45 @@ def get_ios_webview_targets(devkey=None):
 def get_webview_targets(serial=None):
     """汇总可调试目标：device=ios[:<devkey>] → iOS 桥分区；其余 → Android WebView。
 
-    Android 分支复用 cdp.setup()（幂等，自动建 adb forward 并刷新目标）。
+    Android 分支把设备上**每个 WebView App 都摸一遍**（list_webview_apps）：
+      - apps：按 App 分组 [{socket, package, port, targets, error}]，前端据此分组展示，
+        可同时看到多个 App（他ta星球 / 抖你 …）各自的页面
+      - phone：所有 App 的目标扁平合并（向后兼容旧前端与 MCP 消费方）
+    每个 target 自带 socket/package/port，前端打开 DevTools 时把 socket 回传，
+    代理即可连到该 App 自己的端口。
     """
     if serial and serial.startswith("ios"):
         # serial: "ios"（占位/全量）或 "ios:sim:32451"（单设备）
         key = serial.split(":", 1)[1] if serial.startswith("ios:") else None
         return get_ios_webview_targets(key)
     result = {"device": serial, "platform": "android",
-              "phone": [], "phone_error": None, "ios": None}
+              "phone": [], "apps": [], "phone_error": None, "ios": None}
     try:
         if serial is None:
             serial = default_serial()
         if serial is None:
             raise CDPError("未检测到已连接的设备（adb devices 为空）")
-        cdp.setup(serial)
-        serials = [d["serial"] for d in list_devices()]
-        port = resolve_port(serial, CDP_PORT, serials)
-        result["phone"] = _pick_targets(
-            _http_get_json(f"http://127.0.0.1:{port}/json"))
+        result["device"] = serial
+        apps = list_webview_apps(serial)
+        if not apps:
+            raise CDPError("未找到 WebView（请确保 App 已打开 H5 页面并开启了 WebView 调试）")
+        errs = []
+        for a in apps:
+            targets = _pick_targets(a.get("pages"), a.get("socket"),
+                                    a.get("package"), a.get("port"))
+            result["apps"].append({
+                "socket": a.get("socket"),
+                "package": a.get("package") or "",
+                "port": a.get("port"),
+                "targets": targets,
+                "error": a.get("error"),
+            })
+            result["phone"].extend(targets)
+            if a.get("error"):
+                errs.append(f"{a.get('socket')}：{a['error']}")
+        # 所有 App 都探不到页面时才报错（有任意一个可用就算正常）
+        if not result["phone"] and errs:
+            result["phone_error"] = "；".join(errs)
     except Exception as e:
         result["phone_error"] = str(e)
     return result
@@ -930,12 +961,15 @@ def _ws_pump(src, dst, dst_mask_key, reply_mask_key, dst_lock=None, reply_lock=N
             return False
 
 
-def handle_cdp_proxy(browser_sock, target_id, serial=None):
+def handle_cdp_proxy(browser_sock, target_id, serial=None, sock=None):
     """浏览器 WebSocket <-> CDP 上游双向代理。
 
     browser_sock 已由 Handler 完成握手；target 侧复用 cdp.WebSocketClient
     （握手不带 Origin：Android WebView 的 9222、iOS 桥的 9322 才能 101）。
     serial == "ios" 时上游为 pymobiledevice3 桥（不做任何 adb 操作，无 Android 设备也可用）。
+
+    sock 非空时表示要代理到该 App 的 WebView（多 App 并存时每个 App 端口不同）；
+    为空则跟随默认会话（cdp.setup 已挑到有页面的那个 App）。
     """
     if serial and serial.startswith("ios"):   # ios（占位）或 ios:<udid>（单设备）
         udid = serial.split(":", 1)[1] if serial.startswith("ios:") else None
@@ -957,7 +991,17 @@ def handle_cdp_proxy(browser_sock, target_id, serial=None):
                 pass
             return
         serials = [d["serial"] for d in list_devices()]
-        port = resolve_port(serial, CDP_PORT, serials)
+        if not sock:
+            # 未指定 App：跟随默认会话（触发 setup 挑出有页面的那个 App）
+            try:
+                sock = cdp.socket_of(serial)
+            except Exception as e:
+                access_log.log(f"[cdp] 无法确定默认 WebView App：{e}")
+                sock = None
+        if sock:
+            port = app_forward_port(serial, sock, serials)
+        else:
+            port = resolve_port(serial, CDP_PORT, serials)
     upstream = WebSocketClient(f"ws://127.0.0.1:{port}/devtools/page/{target_id}")
     try:
         upstream.connect()
@@ -1333,6 +1377,13 @@ class Handler(BaseHTTPRequestHandler):
         vals = q.get("device")
         return vals[0] if vals else None
 
+    def _query_sock(self):
+        """从 GET query string 提取 socket 参数（多 App 时指定要调试哪个 App 的 WebView）。"""
+        from urllib.parse import urlparse, parse_qs
+        q = parse_qs(urlparse(self.path).query)
+        vals = q.get("socket")
+        return vals[0] if vals and vals[0] else None
+
     def do_OPTIONS(self):
         origin = self.headers.get("Origin") or "*"
         self.send_response(204)
@@ -1421,7 +1472,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self.connection.sendall(resp.encode())
                 self.close_connection = True
-                handle_cdp_proxy(self.connection, target_id, serial=device)
+                handle_cdp_proxy(self.connection, target_id,
+                                 serial=device, sock=self._query_sock())
             elif path.startswith("/devtools/"):
                 self._serve_devtools(path[len("/devtools/"):])
             elif path.startswith("/"):
@@ -1442,6 +1494,8 @@ class Handler(BaseHTTPRequestHandler):
             is_multipart = ctype.startswith("multipart/form-data")
             body = {} if is_multipart else self._read_body()
             device = body.get("device") or self._query_device()
+            # socket：多 App 并存时指定调试哪个 App 的 WebView（不传则跟随默认会话）
+            sock = body.get("socket") or self._query_sock()
             if path == "/api/devtools-source":
                 # 页面 ⚙ 设置 DevTools 面板源：source 为空串 = 恢复默认。
                 # 保存前预检可达性；源变更后清空旧缓存（热生效，无需重启）。
@@ -1469,16 +1523,19 @@ class Handler(BaseHTTPRequestHandler):
                 url = resolved
                 if not url.startswith(("http://", "https://", "file://", "about:")):
                     url = "https://" + url
-                cdp.navigate(url, serial=device)
+                cdp.navigate(url, serial=device, sock=sock)
                 self._send_json({"ok": True, "url": url, "device": device,
+                                 "socket": cdp.socket_of(device, sock),
                                  "ip": host_ip, "replaced_ip": replaced_ip})
 
             elif path == "/api/eval":
                 expr = body.get("expression") or ""
                 if not expr.strip():
                     return self._send_json({"error": "缺少 expression"}, 400)
-                result = cdp.evaluate(expr, serial=device)
-                self._send_json({"ok": True, "device": device, **simplify_eval(result)})
+                result = cdp.evaluate(expr, serial=device, sock=sock)
+                self._send_json({"ok": True, "device": device,
+                                 "socket": cdp.socket_of(device, sock),
+                                 **simplify_eval(result)})
 
             elif path == "/api/tap":
                 if device is None:

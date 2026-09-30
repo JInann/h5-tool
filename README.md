@@ -150,6 +150,16 @@ h5-tool start
 > **WebView socket 命名兼容**：标准 WebView 是 `@webview_devtools_remote_<pid>`，
 > 但小米浏览器等会带前缀（`@browser_webview_devtools_remote_<pid>`），
 > 已兼容两种命名，`adb forward localabstract` 使用完整 socket 名。
+>
+> **多 App 支持（v3）**：同一台手机上可能**同时**开着多个 App 的 WebView
+> （每个 App 一个 `webview_devtools_remote_<pid>` socket）。所有接口都额外支持
+> `socket` 参数（GET 用 `?socket=<socket名>`，POST 用 body 里的 `socket` 字段）：
+> 不传则自动挑「第一个有页面的 App」，传了就精确操作该 App。
+> 每个 App 分配**独立的 CDP 转发端口**（按 `设备+socket` 哈希固定槽位），
+> 互不覆盖、可并行调试。`GET /api/webview-targets` 返回的 `apps` 数组按 App 分组，
+> 每组带 `socket` / `package` / `port`，前端左侧列表据此分组展示。
+> 某个 App 的 WebView 被系统冻结时 socket 会僵死（请求超时），
+> 这只影响它自己那组（带 `error`），其它 App 照常。
 
 | 方法 | 路径              | 说明                                  |
 |------|-------------------|---------------------------------------|
@@ -160,11 +170,11 @@ h5-tool start
 | GET  | `/api/ios/mirror/status` | iOS 屏幕镜像状态：`{running, starting, url, capable, capability_hint, error}`（`device=ios:<udid>` 指定单台） |
 | POST | `/api/ios/mirror/start` | 懒启动 iOS serve-web 镜像桥（幂等，顺带触发屏幕流能力探测） |
 | POST | `/api/ios/mirror/stop`  | 停止镜像（`device=ios:<udid>` 停单台，缺省停全部） |
-| GET  | `/api/webview-targets` | 可调试目标列表（指定设备 WebView） |
-| GET  | `/cdp-ws/<targetId>` | WebSocket 代理：转发到指定设备 WebView CDP（绕过 Origin 校验） |
+| GET  | `/api/webview-targets` | 可调试目标列表，**按 App 分组**：`{device, apps:[{socket,package,port,targets,error}], phone:[…扁平合并…], phone_error}` |
+| GET  | `/cdp-ws/<targetId>?socket=<名>` | WebSocket 代理：转发到指定 App 的 WebView CDP（绕过 Origin 校验） |
 | GET  | `/devtools/*`     | devtools-frontend 静态资源（DevTools 面板） |
-| POST | `/api/navigate`   | `{url, device?}` 导航当前 WebView      |
-| POST | `/api/eval`       | `{expression, device?}` 执行 JS，返回 `{value,type}` |
+| POST | `/api/navigate`   | `{url, device?, socket?}` 导航当前 WebView |
+| POST | `/api/eval`       | `{expression, device?, socket?}` 执行 JS，返回 `{value,type}` |
 | POST | `/api/tap`        | `{x,y, device?}` 设备坐标点击          |
 | POST | `/api/swipe`      | `{x1,y1,x2,y2,dur, device?}` 滑动     |
 | POST | `/api/key`        | `{code, device?}` 按键（back=4, home=3） |
@@ -201,6 +211,11 @@ macOS / Windows 通用。
 首页顶部可拖动的设备栏选择设备，左侧直接列出该设备 WebView 的调试目标，点击「内嵌打开」
 在右侧 iframe 使用完整 DevTools（Console / Sources 断点 / Network / Storage / Elements），
 或「新窗口」独立打开。多台设备时多个浏览器标签各选一台即可并行调试。
+
+**同一台手机上多个 App 同时开着 WebView 时**，左侧列表会**按 App 分组**
+（组头显示 App 短名 + 完整包名 + 页面数），点开任意一组里的页面即可独立调试——
+每个 App 走各自的 CDP 转发端口，互不干扰。若某个 App 的 WebView 被系统冻结
+（切到后台久了会这样），它那组会显示"暂无可调试页面"，把它切回前台刷新即可恢复。
 
 工作原理：devtools-frontend（Chromium 开源前端）是纯 Web 应用，给它一个 CDP WebSocket 地址
 （`inspector.html?ws=...`）即可工作。因为 Android WebView（Chrome 111+ 内核）的 CDP server
@@ -246,11 +261,20 @@ export DEVTOOLS_DIR=http://服务器IP:端口/devtools
 - **仅 Android**：devtools-frontend 只认 CDP，iOS WKWebView 不适用（iOS 可用 vConsole/eruda 注入方案）。
 - 手机 WebView 需开启 `setWebContentsDebuggingEnabled(true)` 才会出现在目标列表。
 - 页面导航 / WebView 重建后 target id 会变，重新在列表里点目标即可。
+- 多个 App 同时开着 WebView 时按 App 分组列出（各自独立端口）；某个 App 切后台过久
+  被系统冻结时，它那组的 CDP 会请求超时（列表里显示为"暂无可调试页面"），
+  把该 App 切回前台即可恢复，不影响其它 App。
 
 ## MCP 接入（AI 使用）
 
 `mcp_server.py` 把后端 HTTP 接口封装成 MCP 工具（stdio 传输），让 AI 客户端直接操作手机：
-截图看画面、点击/滑动/按键/输入文本、发链接到手机 WebView、执行 JS、查设备状态。
+截图看画面、点击/滑动/按键/输入文本、发链接到手机 WebView、执行 JS、查设备状态、
+列出多个 App 的 WebView 目标。
+
+工具清单：`h5_devices` / `h5_status` / `h5_screenshot` / `h5_tap` / `h5_swipe` /
+`h5_press_key` / `h5_type_text` / `h5_navigate` / `h5_webview_targets` / `h5_eval`。
+其中 `h5_navigate`、`h5_eval` 支持 `socket` 参数——手机上有多个 App 同时开着 WebView 时，
+先用 `h5_webview_targets` 拿到各 App 的 `socket`，再指定要在哪个 App 里操作。
 
 ```bash
 # 依赖：mcp[cli]（装在 workbuddy managed venv 中）
