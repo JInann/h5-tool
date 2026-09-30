@@ -256,6 +256,120 @@ def adb_swipe(serial, x1, y1, x2, y2, dur=200):
         raise RuntimeError(r.stderr or "input swipe 失败")
 
 
+# ---------- 实时触摸注入（跟手拖动） ----------
+# adb_swipe 是"一条命令描述整个手势"，手机拿到后按 dur 重新播放——所以只能等用户
+# 松手才发得出去，拖动过程完全不跟手。要跟手必须把按下/移动/抬起拆成独立事件实时注入
+# （input motionevent，Android 11 / SDK 30 起支持）。
+#
+# 但单靠 run_adb() 仍不行：它每次都 fork 一个 adb 进程（冷启动 50~150ms），拖动时
+# 每帧发一条照样跟不上。所以给每台设备维持一个**常驻 adb shell**，事件直接写进它的
+# stdin，单条开销降到 ~15~30ms。
+class TouchUnsupported(Exception):
+    """设备不支持 input motionevent（Android 11 以下）。"""
+
+
+_TOUCH_ACTIONS = {"down": "DOWN", "move": "MOVE", "up": "UP", "cancel": "CANCEL"}
+_touch_sessions = {}          # serial -> TouchSession
+_touch_lock = threading.Lock()
+_motionevent_ok = {}          # serial -> bool
+
+
+class TouchSession:
+    """常驻 adb shell，用于连续注入触摸事件。"""
+
+    def __init__(self, serial):
+        self.serial = serial
+        self.proc = None
+        self.lock = threading.Lock()
+        self.last_used = time.time()
+        self._spawn()
+
+    def _spawn(self):
+        exe = shutil.which("adb") or "adb"
+        self.proc = subprocess.Popen(
+            [exe, "-s", self.serial, "shell"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def send(self, action, x, y):
+        line = f"input motionevent {action} {int(x)} {int(y)}\n".encode()
+        with self.lock:
+            self.last_used = time.time()
+            for attempt in (0, 1):
+                try:
+                    if self.proc is None or self.proc.poll() is not None:
+                        self._spawn()
+                    self.proc.stdin.write(line)
+                    self.proc.stdin.flush()
+                    return
+                except Exception:
+                    if attempt:      # 重试仍失败 → 交给调用方
+                        raise
+                    self.close()     # 管道断了，重建一次
+                    self._spawn()
+
+    def close(self):
+        try:
+            if self.proc and self.proc.stdin:
+                self.proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            if self.proc:
+                self.proc.terminate()
+        except Exception:
+            pass
+        self.proc = None
+
+
+def touch_close_all():
+    with _touch_lock:
+        for s in list(_touch_sessions.values()):
+            s.close()
+        _touch_sessions.clear()
+
+
+def motionevent_supported(serial):
+    """探测设备是否支持 input motionevent（Android 11 / SDK 30 起）。结果缓存。"""
+    if serial in _motionevent_ok:
+        return _motionevent_ok[serial]
+    ok = False
+    try:
+        r = run_adb("shell input motionevent", serial=serial, timeout=5)
+        text = (r.stdout or "") + (r.stderr or "")
+        # 支持时打印用法（含 motionevent）；不支持时是 "Unknown command"
+        ok = "motionevent" in text and "Unknown command" not in text
+    except Exception:
+        ok = False
+    _motionevent_ok[serial] = ok
+    return ok
+
+
+def touch_event(serial, action, x, y):
+    """注入一条触摸事件（down/move/up/cancel）。"""
+    code = _TOUCH_ACTIONS.get(str(action or "").lower())
+    if not code:
+        raise RuntimeError(f"未知触摸动作：{action}")
+    if not motionevent_supported(serial):
+        raise TouchUnsupported("设备不支持 input motionevent（需 Android 11+）")
+    now = time.time()
+    with _touch_lock:
+        # 顺手回收闲置过久的常驻 shell（来回换设备也不至于越积越多）
+        for s in list(_touch_sessions):
+            if now - _touch_sessions[s].last_used > 600:
+                _touch_sessions.pop(s).close()
+        sess = _touch_sessions.get(serial)
+        if sess is None:
+            sess = TouchSession(serial)
+            _touch_sessions[serial] = sess
+    sess.send(code, x, y)
+
+
+atexit.register(touch_close_all)
+
+
 def adb_keyevent(serial, code):
     r = run_adb(f"shell input keyevent {int(code)}", serial=serial)
     if r.returncode != 0:
@@ -1552,6 +1666,23 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"error": "未检测到已连接的设备"}, 400)
                 adb_swipe(device, body["x1"], body["y1"], body["x2"], body["y2"],
                           body.get("dur", 200))
+                self._send_json({"ok": True, "device": device})
+
+            elif path == "/api/touch":
+                # 实时触摸注入（跟手拖动）：{action: down|move|up|cancel, x, y, device?}
+                if device is None:
+                    device = default_serial()
+                if device is None:
+                    return self._send_json({"error": "未检测到已连接的设备"}, 400)
+                try:
+                    touch_event(device, body.get("action"),
+                                body.get("x", 0), body.get("y", 0))
+                except TouchUnsupported as e:
+                    # 让前端回退到 /api/tap、/api/swipe 的老路径
+                    return self._send_json({"ok": False, "unsupported": True,
+                                            "error": str(e)})
+                except Exception as e:
+                    return self._send_json({"error": str(e)}, 500)
                 self._send_json({"ok": True, "device": device})
 
             elif path == "/api/key":

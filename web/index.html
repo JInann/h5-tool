@@ -1623,6 +1623,7 @@ const canvasEl = $("scrcpyCanvas");
 const scrcpyCtx = canvasEl.getContext("2d");
 let living = false, liveTimer = null, curObjUrl = null, lastBlob = null;
 const FPS = 3, INTERVAL = 1000 / FPS;
+const DRAG_INTERVAL = 1000 / 10;   // 拖动中 PNG 轮询提到 ~10fps
 const HAS_WC = !!(window.VideoDecoder && window.VideoFrame && window.EncodedVideoChunk);
 let engine = null, videoSize = { w: 0, h: 0 };
 let scrcpyPlayer = null, scrcpyFrameCount = 0, scrcpyFpsTimer = null;
@@ -1883,7 +1884,9 @@ async function liveLoop() {
     $("fpsLabel").textContent = "✗ " + e.message;
   }
   const elapsed = performance.now() - t0;
-  liveTimer = setTimeout(liveLoop, Math.max(0, INTERVAL - elapsed));
+  // 拖动中提高刷新频率，否则 3fps 下手指动了画面半天才跟上
+  const interval = _touchDown ? DRAG_INTERVAL : INTERVAL;
+  liveTimer = setTimeout(liveLoop, Math.max(0, interval - elapsed));
 }
 function startLiveAndroid() {
   if (living) return;
@@ -1925,35 +1928,92 @@ function flashTap(clientX, clientY) {
   mark.style.opacity = "1";
   setTimeout(() => { mark.style.opacity = "0"; }, 250);
 }
-let down = null;
-$("screenFrame").addEventListener("mousedown", (e) => {
-  down = { x: e.clientX, y: e.clientY, t: performance.now() };
+/* ---------- 触摸注入：实时跟手 ----------
+   老做法只在 mouseup 时发一整条 input swipe，等于让手机"重放"手势，所以不跟手。
+   现在按下 / 移动 / 抬起各发一条 motionevent，手机实时跟随。
+   - 移动事件节流 ~30ms；上一个请求没回来时只保留最新坐标（不排队，否则延迟滚雪球）
+   - 设备不支持 motionevent（Android 11 以下）→ 自动回退到原来的 tap / swipe */
+const TOUCH_INTERVAL = 30;
+let _touchDown = null, _touchLast = 0, _touchLastPos = null;
+let _touchBusy = false, _touchNext = null, _touchUnsupported = false;
+
+function _touchPump() {
+  if (_touchBusy || !_touchNext) return;
+  const payload = _touchNext;
+  _touchNext = null;
+  _touchBusy = true;
+  fetch(apiUrlDev("/api/touch"), {
+    ...fetchOpts(),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then((r) => r.json())
+    .then((res) => { if (res && res.unsupported) _touchUnsupported = true; })
+    .catch(() => {})
+    .then(() => {
+      _touchBusy = false;
+      if (_touchNext) _touchPump();
+    });
+}
+function pushTouch(action, x, y) {
+  if (_touchUnsupported) return;
+  _touchNext = { action, x: Math.round(x), y: Math.round(y) };
+  _touchPump();
+}
+
+const screenFrameEl = $("screenFrame");
+screenFrameEl.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  _touchDown = { x: e.clientX, y: e.clientY, t: performance.now() };
+  _touchLast = 0;
+  _touchLastPos = toDeviceCoords(e.clientX, e.clientY);
+  try { screenFrameEl.setPointerCapture(e.pointerId); } catch (err) {}
+  pushTouch("down", _touchLastPos.x, _touchLastPos.y);
+  e.preventDefault();
 });
-$("screenFrame").addEventListener("mouseup", async (e) => {
-  if (!down) return;
-  const dx = e.clientX - down.x, dy = e.clientY - down.y;
-  const dist = Math.hypot(dx, dy);
+screenFrameEl.addEventListener("pointermove", (e) => {
+  if (!_touchDown) return;
+  const now = performance.now();
+  if (now - _touchLast < TOUCH_INTERVAL) return;   // 节流
+  _touchLast = now;
+  _touchLastPos = toDeviceCoords(e.clientX, e.clientY);
+  pushTouch("move", _touchLastPos.x, _touchLastPos.y);
+});
+screenFrameEl.addEventListener("pointerup", (e) => {
+  if (!_touchDown) return;
+  const info = _touchDown;
+  _touchDown = null;
+  const dist = Math.hypot(e.clientX - info.x, e.clientY - info.y);
   flashTap(e.clientX, e.clientY);
-  try {
+  const p = toDeviceCoords(e.clientX, e.clientY);
+  _touchLastPos = p;
+  if (_touchUnsupported) {
+    // 老设备回退：松手后一次性 tap / swipe（即原来的行为）
+    const hdr = { "Content-Type": "application/json" };
+    const dur = Math.min(800, Math.max(120, Math.round(performance.now() - info.t)));
     if (dist < 8) {
-      const p = toDeviceCoords(e.clientX, e.clientY);
-      await api("/api/tap", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+      api("/api/tap", { method: "POST", headers: hdr, body: JSON.stringify(p) })
+        .catch((err) => console.error(err));
     } else {
-      const a = toDeviceCoords(down.x, down.y);
-      const b = toDeviceCoords(e.clientX, e.clientY);
-      const dur = Math.min(800, Math.max(120, Math.round(performance.now() - down.t)));
-      await api("/api/swipe", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, dur }),
-      });
+      const a = toDeviceCoords(info.x, info.y);
+      api("/api/swipe", { method: "POST", headers: hdr,
+                          body: JSON.stringify({ x1: a.x, y1: a.y, x2: p.x, y2: p.y, dur }) })
+        .catch((err) => console.error(err));
     }
-    if (engine === "legacy") setTimeout(refreshFrameQuiet, 100);
-  } catch (err) {
-    console.error(err);
+  } else {
+    pushTouch("up", p.x, p.y);
   }
-  down = null;
+  if (engine === "legacy") setTimeout(refreshFrameQuiet, 100);
 });
-$("screenFrame").addEventListener("dragstart", (e) => e.preventDefault());
+screenFrameEl.addEventListener("pointercancel", () => {
+  if (!_touchDown) return;
+  _touchDown = null;
+  // 兜底抬起：否则手机端的按下状态会一直挂着
+  const p = _touchLastPos || { x: 0, y: 0 };
+  pushTouch("up", p.x, p.y);
+});
+screenFrameEl.addEventListener("dragstart", (e) => e.preventDefault());
 async function sendKey(code) {
   try { await api("/api/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) }); }
   catch (e) { console.error(e); }
